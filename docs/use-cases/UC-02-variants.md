@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | draft |
 | **Owner** | MarcoGorelli |
-| **Last updated** | 2026-09-03 |
+| **Last updated** | 2026-09-09 |
 | **Related** | |
 
 ### 1. Summary
@@ -20,7 +20,7 @@ Several projects want to ensure that certain invariants remain true over time. F
 - [Narwhals](https://github.com/narwhals-dev/narwhals) wants to compare the following and check that the former is never much slower than the latter:
   - Run a function in pandas natively.
   - Run a function in Narwhals (backed by pandas).
-- [Polars](https://github.com/pola-rs/polars/pull) wants to check that some operations are never slower than their Python standard library or pandas counterparts.
+- [Polars](https://github.com/pola-rs/polars/issues/13157) wants to check that some Polars operations aren't slower than equivalent operations in other libraries.
 
 Motivation:
 
@@ -37,14 +37,36 @@ Motivation:
 
 Something like
 ```
-$ benchx compare-variants --name dt_truncate.py --rounds 5
+$ benchx compare-variants --name run_benchmark.py --rounds 5
 
 role              benchmark_name   time     vs. baseline
-baseline          dt_truncate      120 ns   -
-variant           dt_truncate      124 ns   +3.3%   (within a 5% margin — OK)
+baseline          truncate         120 ns   -
+variant           truncate         124 ns   +3.3%   (within a 5% margin — OK)
 ```
 
-Within `dt_truncate.py`, the benchmark should be parametrised over the `baseline` and `variant` implementations.
+where `run_benchmark.py` may look like:
+
+```py
+from typing import Callable
+from benchx import parametrize, time_it
+
+import pandas as pd
+
+def pandas_via_narwhals_truncate(data: pd.Series["pd.Timestamp"]) -> None:
+    pass
+
+def pandas_native_truncate(data: pd.Series["pd.Timestamp"]) -> None:
+    pass
+
+def setup_data() -> pd.Series["pd.Timestamp"]:
+    pass
+
+
+@parametrize('role', {'baseline': pandas_native_truncate, 'variant': pandas_via_narwhals_truncate})
+def truncate(role: Callable[..., None]) -> None:
+    data = setup_data()
+    time_it(lambda: role(data))
+```
 
 After the rounds are run (interleaved), the minimum for each role is reported on.
 If the difference was greater than some threshold, say here 5%, this would be flagged as an error.
@@ -63,10 +85,10 @@ State for each:
 
 | Coordinate | Role | Notes |
 |---|---|---|
-| Code identity | varying | |
+| Code identity | varying | same benchmark ID, but the params differ |
 | Code version | controlled | |
 | Environment | controlled | |
-| Execution context | controlled | |
+| Execution context | controlled | Interleave position alternates between roles |
 
 Code identity varies within each run (we are comparing two functions). Everything else stays constant. Variant and baseline should be interleaved across multiple rounds per session so that per-session drift affects both roles equally.
 
@@ -97,7 +119,7 @@ Code identity varies within each run (we are comparing two functions). Everythin
 - **Fields required to be *absent* or explicitly null:** none
 - **New fields not currently in the schema:**
   - "role": Enum('variant', 'baseline'). Defined by the caller (`--baseline` / `--variant`).
-- **Comparability key:** same `session_id`, same `benchmark_name`, minimum timing across rounds.
+- **Comparability key:** same `session_id`, same `benchmark_name`.
 - **Validation invariants:**:
   - For any `session_id` and `benchmark_name`, `role="baseline"` and `role="variant"` should have equal round counts.
   - Both records share the same commit and environment.
