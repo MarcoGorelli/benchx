@@ -37,12 +37,14 @@ Motivation:
 
 Something like
 ```
-$ benchx compare-variants --baseline pandas_truncate.py --variant polars_truncate.py --name dt_truncate --rounds 5
+$ benchx compare-variants --name dt_truncate.py --rounds 5
 
 role              benchmark_name   time     vs. baseline
 baseline          dt_truncate      120 ns   -
 variant           dt_truncate      124 ns   +3.3%   (within a 5% margin — OK)
 ```
+
+Within `dt_truncate.py`, the benchmark should be parametrised over the `baseline` and `variant` implementations.
 
 After the rounds are run (interleaved), the minimum for each role is reported on.
 If the difference was greater than some threshold, say here 5%, this would be flagged as an error.
