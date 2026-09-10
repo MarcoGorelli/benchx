@@ -92,8 +92,8 @@ State for each:
 ### 7. Comparison semantics
 
 - **What comparison is valid?** within a session (the interleaved sequence of
-  baseline and variant invocations, joined by shared `session-id`), the minimum
-  timing per environment is compared.
+  baseline and variant invocations, joined by shared `session-id`), the [minimum
+  timing per environment is compared](https://docs.python.org/3/library/timeit.html#timeit.Timer.repeat).
 - **Estimator:** minimum is usually recommended
 - **What counts as a real difference?** Up to the user to determine.
 - **Expected noise floor** this depends on the code being benchmarked, user should adjust interpretation accordingly.
