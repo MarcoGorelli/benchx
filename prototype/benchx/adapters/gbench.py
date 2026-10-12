@@ -45,10 +45,11 @@ def protocol(precision: dict) -> tuple[dict, list[str]]:
     rejected by the schema, so only gbench-specific unsupported shapes are
     checked here.
     """
+    problems = []
     repetitions = precision["repetitions"]
     levels = [{"unit": "repetition", "n": repetitions}] if isinstance(repetitions, int) else repetitions["levels"]
     if len(levels) != 1 or levels[0]["unit"] != "repetition":
-        raise Unsupported("google-benchmark repeats at one level, unit 'repetition'")
+        problems.append("google-benchmark repeats at one level, unit 'repetition'")
     applied = {
         "repetitions": {"mode": "fixed", "levels": levels},
         "calibration": precision.get("calibration", DEFAULTS["calibration"]),
@@ -66,9 +67,11 @@ def protocol(precision: dict) -> tuple[dict, list[str]]:
     if warmup["mode"] == "time":
         flags.append(f"--benchmark_min_warmup_time={warmup['seconds']}")
     elif warmup["mode"] == "count":
-        raise Unsupported("google-benchmark warmup is time-based only, not count-based")
+        problems.append("google-benchmark warmup is time-based only, not count-based")
     elif warmup["mode"] != "none":
-        raise Unsupported(f"unknown warmup mode: {warmup['mode']}")
+        problems.append(f"unknown warmup mode: {warmup['mode']}")
+    if problems:
+        raise Unsupported(*problems)
     return applied, flags
 
 

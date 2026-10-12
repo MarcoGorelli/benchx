@@ -1,4 +1,8 @@
-"""Rules JSON Schema cannot express. They assume the document fits its schema."""
+"""Rules JSON Schema cannot express. They assume the document fits its schema.
+
+They hold for the document alone: what one runner or machine cannot carry out
+is that runner's refusal, not a rule.
+"""
 
 import json
 from collections.abc import Iterator
@@ -13,6 +17,7 @@ from .errors import (
     PathParts,
     PrimarySourceMismatch,
     RuleViolation,
+    SharedParameterName,
 )
 from .validation import Kind
 
@@ -20,7 +25,11 @@ from .validation import Kind
 def check(data: dict[str, Any], kind: Kind) -> Iterator[RuleViolation]:
     if kind == "measurement-result":
         yield from check_result(data)
-    elif kind == "work-order" or kind == "comparison-document":
+    elif kind == "work-order":
+        yield from check_order(data)
+    elif kind == "target-description" or kind == "target-provider-request":
+        return  # nothing beyond what their schemas say
+    elif kind == "comparison-document":
         raise NotImplementedError(f"no rules for {kind} yet")
     else:
         assert_never(kind)
@@ -131,3 +140,14 @@ def repetition_counts(data: dict[str, Any]) -> Iterator[RuleViolation]:
             completed=completed,
             attempted=attempted,
         )
+
+
+def check_order(data: dict[str, Any]) -> Iterator[RuleViolation]:
+    yield from distinct_parameter_names(data)
+
+
+def distinct_parameter_names(data: dict[str, Any]) -> Iterator[RuleViolation]:
+    variables = data.get("environment_variables", {})
+    for name in data.get("workload_parameters", {}):
+        if name in variables:
+            yield SharedParameterName(path=("workload_parameters", name), name=name)

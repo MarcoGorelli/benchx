@@ -82,17 +82,17 @@ def test_a_refused_order_stops_the_session(tmp, builds, monkeypatch):
 def test_measure_mode_equals_read_mode(repo, tmp, builds, capsys):
     common = ["--profile", "revisions"]
     assert cli.main(["compare", builds["baseline"], builds["contender"], *common, "--suite", "demo-bench",
-                     "--rounds", "5", "--run-key", "cli-1", "--out", str(tmp / "o"), "--json"]) == 0
+                     "--rounds", "5", "--run-key", "cli-1", "--out", str(tmp / "o"), "--json"]) == cli.EXIT_OK
     measured = json.loads(capsys.readouterr().out)
-    assert cli.main(["compare", "--run", "cli-1", *common, "--baseline", repo["base"][:10], "--json"]) == 0
+    assert cli.main(["compare", "--run", "cli-1", *common, "--baseline", repo["base"][:10], "--json"]) == cli.EXIT_OK
     assert json.loads(capsys.readouterr().out) == measured
     assert measured["mode"] == "run" and verdicts(measured)[QUIET] == "regressed"
     # criterion 8: the output directory, orders subdirectory and all, compares to the same document
     assert cli.main(["compare", "--run", "cli-1", *common, "--baseline", repo["base"][:10], "--json",
-                     "--results", str(tmp / "o")]) == 0
+                     "--results", str(tmp / "o")]) == cli.EXIT_OK
     assert json.loads(capsys.readouterr().out) == measured
     # re-ingesting what measure mode already delivered is a visible no-op (criterion 2)
-    assert cli.main(["ingest", str(tmp / "o")]) == 0
+    assert cli.main(["ingest", str(tmp / "o")]) == cli.EXIT_OK
     assert "ingested 0" in capsys.readouterr().out
 
 
@@ -107,5 +107,5 @@ def test_measure_mode_equals_read_mode(repo, tmp, builds, capsys):
     (["--run", "k", "--profile", "revisions", "--baseline", "x", "--rounds", "3"], "measure mode"),
 ])
 def test_mode_selection(argv, message, capsys):
-    assert cli.main(["compare", *argv]) == 2
+    assert cli.main(["compare", *argv]) == cli.EXIT_REFUSED
     assert message in capsys.readouterr().err

@@ -9,13 +9,25 @@ import json
 import sys
 import tempfile
 from pathlib import Path
+from typing import get_args
 
 from . import bench as bench_mod
 from . import compare as compare_mod
 from . import config as config_mod
-from . import runner, session
+from . import core, runner, session
 from . import target as target_mod
+from .core.validation import Kind
 from .store import Store
+
+EXIT_OK = 0
+EXIT_INVALID = 1  # a document invalid, a result rejected, or a target without a description
+EXIT_REFUSED = 2  # the command was refused or could not be carried out
+
+
+def _refused(error: runner.Refused) -> int:
+    for problem in error.problems:
+        print(f"refused: {problem}", file=sys.stderr)
+    return EXIT_REFUSED
 
 
 def cmd_run(args):
@@ -26,12 +38,11 @@ def cmd_run(args):
     try:
         summary = runner.run(args.order, out)
     except runner.Refused as e:
-        print(f"refused: {e}", file=sys.stderr)
-        return 2
+        return _refused(e)
     print(f"{summary['results']} result(s) for {summary['cases']} case(s) -> {summary['out']}"
           f"  (order {summary['order'][:19]})")
     if args.no_ingest:
-        return 0
+        return EXIT_OK
     store = Store()
     print(f"{store.path}: ", end="")
     return _report(store.ingest_paths(summary["files"]))
@@ -45,7 +56,7 @@ def cmd_bench(args):
         name, eq, value = item.partition("=")
         if not (name and eq):
             print(f"bx bench: error: -e wants NAME=VALUE, not {item!r}", file=sys.stderr)
-            return 2
+            return EXIT_REFUSED
         env[name] = value
     try:
         flags = bench_mod.flags_to_precision(args.processes, args.values, args.min_time, args.loops, args.warmups)
@@ -59,14 +70,13 @@ def cmd_bench(args):
         summary = bench_mod.run_order(order, out)
     except (bench_mod.SessionError, config_mod.ConfigError) as e:
         print(f"bx bench: error: {e}", file=sys.stderr)
-        return 2
+        return EXIT_REFUSED
     except runner.Refused as e:
-        print(f"refused: {e}", file=sys.stderr)
-        return 2
+        return _refused(e)
     print(bench_mod.render(bench_mod.summarize(summary["files"])))
     print(f"\n{summary['results']} result(s) -> {summary['out']}  (order {summary['order'][:19]})")
     if args.no_ingest:
-        return 0
+        return EXIT_OK
     store = Store()
     print(f"{store.path}: ", end="")
     return _report(store.ingest_paths(summary["files"]))
@@ -77,9 +87,9 @@ def cmd_config(args):
         path = config_mod.write_template(args.dir)
     except config_mod.ConfigError as e:
         print(f"bx config: error: {e}", file=sys.stderr)
-        return 2
+        return EXIT_REFUSED
     print(f"wrote {path}")
-    return 0
+    return EXIT_OK
 
 
 def _report(outcome):
@@ -90,7 +100,7 @@ def _report(outcome):
         codes = sorted({r["code"] for r in outcome["rejected"]})
         counts += f", rejected {len(outcome['rejected'])} ({', '.join(codes)})"
     print(counts)
-    return 1 if outcome["rejected"] else 0
+    return EXIT_INVALID if outcome["rejected"] else EXIT_OK
 
 
 def cmd_ingest(args):
@@ -102,7 +112,7 @@ def cmd_series(args):
         estimator = json.loads(s["estimator"])["method_version"]
         print(f"{s['fingerprint'][:12]}  {s['project']}  {s['workload']}  {s['quantity']} [{s['unit']}]"
               f"  est={estimator}")
-    return 0
+    return EXIT_OK
 
 
 def cmd_history(args):
@@ -110,7 +120,7 @@ def cmd_history(args):
     print("revision order unavailable without a revision graph; listed by measurement start")
     for p in points:
         print(f"{p['revision'][:12]}  {p['started_at']}  {p['value']:.6g} ({p['source']})  {p['ingest_key']}")
-    return 0
+    return EXIT_OK
 
 
 def cmd_head(args):
@@ -119,7 +129,7 @@ def cmd_head(args):
     if args.json:
         for row in rows:
             print(row["document"])
-        return 0
+        return EXIT_OK
     print(f"{store.path}: {total} result(s); latest {len(rows)}, newest first")
     for r in rows:
         median = f"{r['median']:.6g} {r['unit']}" if r["median"] is not None else "-"
@@ -127,7 +137,7 @@ def cmd_head(args):
         labels = f"  {r['labels']}" if r["labels"] else ""
         print(f"{r['row']:>5}  {started}  {r['run_key']:<24} {r['workload']:<16} {r['quantity']:<9} "
               f"{r['status']:<8} {median:<14} {r['revision'][:10]}  {r['project']}{labels}")
-    return 0
+    return EXIT_OK
 
 
 def cmd_target(args):
@@ -137,12 +147,12 @@ def cmd_target(args):
         description = target_mod.resolve(args.target, operation=args.operation)
     except target_mod.TargetError as e:
         print(f"cannot {args.operation} {args.target}: {e}", file=sys.stderr)
-        return 2
+        return EXIT_REFUSED
     if description is None:
         print(f"{args.target} has no description: no {target_mod.SIDECAR} in it", file=sys.stderr)
-        return 1
+        return EXIT_INVALID
     print(json.dumps(description, indent=1))
-    return 0
+    return EXIT_OK
 
 
 class UsageError(Exception):
@@ -185,7 +195,7 @@ def cmd_compare(args):
         mode = _mode(args)
     except UsageError as e:
         print(f"bx compare: error: {e}", file=sys.stderr)
-        return 2
+        return EXIT_REFUSED
     return _measure(args) if mode == "measure" else _read(args)
 
 
@@ -213,13 +223,12 @@ def _measure(args):
             source_uri=args.source_uri, k=args.k, min_rounds=args.min_rounds, build=not args.no_build,
             progress=lambda message: print(message, file=sys.stderr))
     except runner.Refused as e:
-        print(f"refused: {e}", file=sys.stderr)
-        return 2
+        return _refused(e)
     except (session.SessionError, compare_mod.CompareError) as e:
         print(f"cannot compare: {e}", file=sys.stderr)
-        return 2
+        return EXIT_REFUSED
     print(json.dumps(doc, indent=1) if args.json else compare_mod.render(doc))
-    return 0
+    return EXIT_OK
 
 
 def _compare(store, args):
@@ -229,9 +238,20 @@ def _compare(store, args):
                                   min_rounds=args.min_rounds)
     except compare_mod.CompareError as e:
         print(f"cannot compare: {e}", file=sys.stderr)
-        return 2
+        return EXIT_REFUSED
     print(json.dumps(doc, indent=1) if args.json else compare_mod.render(doc))
-    return 0
+    return EXIT_OK
+
+
+def cmd_validate(args):
+    valid = 0
+    for path in args.files:
+        inspection = core.inspect(path, args.kind)
+        for error in inspection.errors:
+            print(f"{path}: {error}", file=sys.stderr)
+        valid += inspection.valid
+    print(f"{valid}/{len(args.files)} valid", file=sys.stderr)
+    return EXIT_OK if valid == len(args.files) else EXIT_INVALID
 
 
 def main(argv=None):
@@ -331,6 +351,13 @@ def main(argv=None):
                          help="ask a provider to describe each @CONFIG target instead of preparing (building) it")
     measure.add_argument("--source-uri", help="the source's URI when the sides' checkouts do not share one")
     p.set_defaults(fn=cmd_compare)
+
+    p = sub.add_parser("validate", help="check documents against their schema and rules",
+                       description="Report every problem in each document, or nothing when all are valid.")
+    p.add_argument("files", type=Path, nargs="+")
+    p.add_argument("--kind", choices=get_args(Kind), default="measurement-result",
+                   help="kind of document being checked (default: %(default)s)")
+    p.set_defaults(fn=cmd_validate)
 
     args = ap.parse_args(argv)
     return args.fn(args)

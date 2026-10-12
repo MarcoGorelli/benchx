@@ -11,6 +11,7 @@ from benchx.core.errors import (
     EndedBeforeStarted,
     PrimarySourceMismatch,
     RuleViolation,
+    SharedParameterName,
 )
 
 
@@ -28,10 +29,31 @@ def test_examples_break_no_rules(example):
     assert check(example) == []
 
 
-@pytest.mark.parametrize("kind", ["work-order", "comparison-document"])
-def test_rules_not_implemented(kind):
-    with pytest.raises(NotImplementedError, match=kind):
-        list(rules.check({}, kind))
+def test_well_formed_order_breaks_no_rules():
+    document = {
+        "environment_variables": {"OMP_NUM_THREADS": "1"},
+        "workload_parameters": {"size": 10},
+    }
+    assert list(rules.check(document, "work-order")) == []
+
+
+def test_name_shared_by_environment_and_parameters():
+    document = {
+        "environment_variables": {"threads": "1", "OMP_NUM_THREADS": "1"},
+        "workload_parameters": {"threads": 1, "size": 10},
+    }
+    [issue] = rules.check(document, "work-order")
+    assert issue == SharedParameterName(
+        path=("workload_parameters", "threads"), name="threads"
+    )
+    assert issue.message == (
+        "'threads' is both an environment variable and a workload parameter"
+    )
+
+
+def test_rules_not_implemented():
+    with pytest.raises(NotImplementedError, match="comparison-document"):
+        list(rules.check({}, "comparison-document"))
 
 
 def test_primary_source_mismatch(adhoc):

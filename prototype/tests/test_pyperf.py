@@ -43,7 +43,7 @@ MODULE = textwrap.dedent('''
 
 
 def results(directory: Path) -> list[dict]:
-    return [core.load(p) for p in sorted(directory.glob("*.json")) if not p.name.startswith("workorder-")]
+    return [json.loads(p.read_text()) for p in sorted(directory.glob("*.json")) if not p.name.startswith("workorder-")]
 
 
 @pytest.fixture
@@ -76,7 +76,7 @@ def test_end_to_end_result(tmp, tree):
     docs = run_order(tmp, pyperf_order(tree, "e2e"), "e2e")
     assert [d["coordinates"]["workload"]["name"] for d in docs] == ["f"]
     doc = docs[0]
-    core.validate_result(doc)
+    assert core.check(doc, "measurement-result") == []
     measurement = doc["measurement"]
     assert measurement["status"] == "success"
     observations = measurement["observations"]

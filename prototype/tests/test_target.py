@@ -60,12 +60,12 @@ def test_sidecar_is_validated_and_belongs_to_its_directory(repo, tmp):
 def test_description_schema_rejects_what_the_contract_forbids(repo, tmp):
     build = make_build(tmp / "b", repo["wt-head"], cases())
     bad = describe(build, repo["wt-head"], shell="not a shell")
-    with pytest.raises(Exception, match="shell"):
-        core.validate_description(bad)
+    [problem] = core.check(bad, "target-description")
+    assert "shell" in problem.path
     relative = describe(build, repo["wt-head"])
     relative["target"]["path"] = "build/relative"
-    with pytest.raises(Exception, match="path"):
-        core.validate_description(relative)
+    [problem] = core.check(relative, "target-description")
+    assert problem.path[-1] == "path"
 
 
 @pytest.fixture

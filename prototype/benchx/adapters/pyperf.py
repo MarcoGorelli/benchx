@@ -66,15 +66,18 @@ def protocol(precision: dict) -> tuple[dict, list[str]]:
     is always passed: every worker inherits the full environment (the user
     prepared it; nothing is scrubbed), and that choice is part of the protocol.
     """
+    problems = []
     repetitions = precision["repetitions"]
-    if isinstance(repetitions, int):
-        raise Unsupported("pyperf repeats at two levels; give repetitions as "
-                          "{mode: fixed, levels: [{unit: process, n}, {unit: value, n}]}")
     given = {}
-    for level in repetitions["levels"]:
-        if level["unit"] not in ("process", "value") or level["unit"] in given:
-            raise Unsupported("pyperf repetition levels are 'process' and 'value', once each")
-        given[level["unit"]] = level["n"]
+    if isinstance(repetitions, int):
+        problems.append("pyperf repeats at two levels; give repetitions as "
+                        "{mode: fixed, levels: [{unit: process, n}, {unit: value, n}]}")
+    else:
+        for level in repetitions["levels"]:
+            if level["unit"] not in ("process", "value") or level["unit"] in given:
+                problems.append("pyperf repetition levels are 'process' and 'value', once each")
+                break
+            given[level["unit"]] = level["n"]
     processes, values = given.get("process", DEFAULTS["processes"]), given.get("value", DEFAULTS["values"])
 
     calibration = precision.get("calibration", DEFAULTS["calibration"])
@@ -85,7 +88,9 @@ def protocol(precision: dict) -> tuple[dict, list[str]]:
     else:
         flags += ["--min-time", str(calibration["minimum_sample_seconds"])]
     if warmup["mode"] == "time":
-        raise Unsupported("pyperf warmup is count-based only, not time-based")
+        problems.append("pyperf warmup is count-based only, not time-based")
+    if problems:
+        raise Unsupported(*problems)
     flags += ["--warmups", str(warmup["n_warmup"] if warmup["mode"] == "count" else 0)]
     flags.append("--copy-env")
 

@@ -21,6 +21,7 @@ import subprocess
 from pathlib import Path
 
 from . import core
+from .core import loader
 
 SIDECAR = ".benchx-target.json"
 PROVIDER_FILE = Path(".benchx") / "provider.json"
@@ -65,11 +66,10 @@ def find_provider(start="."):
     for directory in (start, *start.parents):
         path = directory / PROVIDER_FILE
         if path.is_file():
-            try:
-                config = core.load(path)
-            except core.DocumentError as e:
-                raise TargetError(f"{path}: {e.message}") from None
-            command = config.get("command") if isinstance(config, dict) else None
+            config, errors = loader.read(path)
+            if config is None:
+                raise TargetError(f"{path}: " + "; ".join(str(error) for error in errors))
+            command = config.get("command")
             if not (isinstance(command, list) and command and all(isinstance(c, str) for c in command)):
                 raise TargetError(f'{path} must be {{"command": ["program", "arg", ...]}}')
             return command, directory
@@ -86,10 +86,9 @@ def call_provider(command, cwd, operation, source_ref, configuration) -> dict:
                "source_ref": source_ref}
     if configuration:
         request["configuration"] = configuration
-    try:
-        core.validate_request(request)
-    except core.DocumentError as e:
-        raise TargetError(e.message) from None
+    errors = core.check(request, "target-provider-request")
+    if errors:
+        raise TargetError("; ".join(str(error) for error in errors))
     label = f"@{configuration}" if configuration else source_ref
     try:
         done = subprocess.run(command, input=json.dumps(request), text=True, cwd=cwd,
@@ -102,11 +101,12 @@ def call_provider(command, cwd, operation, source_ref, configuration) -> dict:
 
 
 def _validated(raw: str, where: str) -> dict:
-    try:
-        description = core.loads(raw)
-        core.validate_description(description)
-    except core.DocumentError as e:
-        raise TargetError(f"{where} is not a target description: {e.message}") from None
+    description, errors = loader.parse(raw)
+    if description is not None:
+        errors = core.check(description, "target-description")
+    if errors:
+        problems = "; ".join(str(error) for error in errors)
+        raise TargetError(f"{where} is not a target description: {problems}")
     return description
 
 

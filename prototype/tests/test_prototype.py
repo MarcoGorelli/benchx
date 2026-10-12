@@ -6,12 +6,17 @@ from pathlib import Path
 import pytest
 
 from benchx import compare, core, identity, runner
+from benchx.core.errors import StructureError
 from benchx.store import Store
 from conftest import NOISY, QUIET, SOURCE_URI, cases, make_build, order, run_rounds
 
 
+def load(path: Path) -> dict:
+    return json.loads(path.read_text())
+
+
 def results(directory: Path) -> list[dict]:
-    return [core.load(p) for p in sorted(directory.glob("*.json")) if not p.name.startswith("workorder-")]
+    return [load(p) for p in sorted(directory.glob("*.json")) if not p.name.startswith("workorder-")]
 
 
 def verdicts(doc) -> dict:
@@ -41,7 +46,7 @@ def test_results_are_valid_documents(revisions_run):
     docs = results(revisions_run)
     assert len(docs) == 2 * 6 * 2  # cases × rounds × sides
     for doc in docs:
-        core.validate_result(doc)  # criterion 1: the file is the ingest payload
+        assert core.check(doc, "measurement-result") == []  # criterion 1: the file is the ingest payload
         assert doc["provenance"]["subject_dirty"] == "clean"
         assert doc["coordinates"]["environment"]["schema"] == "machine/v1"
         config = doc["coordinates"]["subject"]["configuration"]
@@ -231,7 +236,7 @@ def test_failures_are_results(repo, tmp):
                                 "source": {"uri": SOURCE_URI, "type": "git"}, "revision": "abc"}),
      "build and working_tree targets"),
     (lambda o: o.update(target={"kind": "revision", "source": {"uri": SOURCE_URI, "type": "git"},
-                                "revision": "deadbeef"}), "work order invalid"),  # the runner never builds
+                                "revision": "deadbeef"}), "malformed at /target"),  # the runner never builds
     (lambda o: o.update(environment_policy={"name": "laptop-default", "version": "1.0.0"}),
      "environment_policy is deferred"),
     (lambda o: o.update(build={"type": "release"}), "build is deferred"),
@@ -241,7 +246,7 @@ def test_failures_are_results(repo, tmp):
     (lambda o: o.update(schedule={"kind": "alternating"}), "schedule is deferred"),
     (lambda o: o["suites"][0].update(suite="missing-binary"), "not found"),
     (lambda o: o.update(quantities=["peak-rss"]), "quantities"),
-    (lambda o: o.update(surprise=1), "work order invalid"),
+    (lambda o: o.update(surprise=1), "'surprise' was unexpected"),
 ])
 def test_refusals(repo, tmp, change, message):
     build = make_build(tmp / "b", repo["wt-head"], cases())
@@ -253,6 +258,42 @@ def test_refusals(repo, tmp, change, message):
         runner.run(path, tmp / "refused")
     assert not list((tmp / "refused").glob("*.json")) if (tmp / "refused").exists() else True
 
+
+def refused(tmp, document) -> list:
+    path = tmp / "o.json"
+    path.write_text(json.dumps(document))
+    with pytest.raises(runner.Refused) as raised:
+        runner.run(path, tmp / "refused")
+    return list(raised.value.problems)
+
+
+def test_every_refusal_is_reported(repo, tmp):
+    document = order(make_build(tmp / "b", repo["wt-head"], cases()), repo["wt-head"], "refused")
+    document.update(quantities=["peak-rss"], workload_parameters={"size": 1}, schedule={"kind": "alternating"})
+    document["precision"].update(warmup={"mode": "count", "n_warmup": 2})
+    assert [str(problem) for problem in refused(tmp, document)] == [
+        "google-benchmark takes no workload_parameters",
+        "quantities not supported: ['peak-rss']",
+        "schedule is deferred in the prototype: side scheduling (the session loop alternates the sides)",
+        "google-benchmark warmup is time-based only, not count-based",
+    ]
+
+
+def test_missing_build_is_refused_for_every_reason(tmp):
+    problems = refused(tmp, order(tmp / "absent", None, "refused"))
+    assert all(type(problem) is core.Refusal for problem in problems)
+    assert [str(problem).split(":")[0] for problem in problems] == [
+        "suite binary not found",
+        "cannot locate the checkout the target was built from; set target.source_dir",
+    ]
+
+
+def test_invalid_order_is_refused_with_its_document_errors(repo, tmp):
+    document = order(make_build(tmp / "b", repo["wt-head"], cases()), repo["wt-head"], "refused")
+    document.update(surprise=1, run_key="")
+    problems = refused(tmp, document)
+    assert {type(problem) for problem in problems} == {StructureError}
+    assert {problem.path for problem in problems} == {(), ("run_key",)}
 
 def test_source_found_through_cmake_cache(repo, tmp):
     build = make_build(tmp / "b", repo["wt-head"], cases())
@@ -365,7 +406,7 @@ def test_head(revisions_run, tmp):
     assert total == 24 and [r["row"] for r in rows] == [23, 22, 21]
     assert all(r["run_key"] == "rev-1" and r["status"] == "success" and r["median"] > 0 for r in rows)
     ingested_last = sorted(p for p in revisions_run.glob("*.json") if not p.name.startswith("workorder-"))[-1]
-    assert core.loads(rows[0]["document"]) == core.load(ingested_last)
+    assert json.loads(rows[0]["document"]) == load(ingested_last)
 
 
 def test_bx_run_delivers_to_the_local_store(repo, tmp, capsys):
@@ -376,14 +417,14 @@ def test_bx_run_delivers_to_the_local_store(repo, tmp, capsys):
     for slot, name in enumerate(("o1", "o2")):
         (tmp / f"{name}.json").write_text(json.dumps(order(build, repo["wt-head"], "cli", slot=slot)))
     assert default_path() == tmp / "benchx-home" / "store.parquet"
-    assert cli.main(["run", str(tmp / "o1.json"), "--out", str(tmp / "out")]) == 0
+    assert cli.main(["run", str(tmp / "o1.json"), "--out", str(tmp / "out")]) == cli.EXIT_OK
     assert "ingested 2, duplicate 0" in capsys.readouterr().out  # this run's files only
-    assert cli.main(["run", str(tmp / "o2.json"), "--out", str(tmp / "out"), "--no-ingest"]) == 0
+    assert cli.main(["run", str(tmp / "o2.json"), "--out", str(tmp / "out"), "--no-ingest"]) == cli.EXIT_OK
     assert len(results(tmp / "out")) == 4  # both runs' files are written
     total, rows = Store().head()
-    assert total == 2 and {core.load(tmp / "o1.json")["run_key"]} == {r["run_key"] for r in rows}
-    ref = core.loads(rows[0]["document"])["provenance"]["info"]["workorder_ref"]
-    assert Store().order(ref) == core.load(tmp / "o1.json")  # the order travelled with its results
+    assert total == 2 and {load(tmp / "o1.json")["run_key"]} == {r["run_key"] for r in rows}
+    ref = json.loads(rows[0]["document"])["provenance"]["info"]["workorder_ref"]
+    assert Store().order(ref) == load(tmp / "o1.json")  # the order travelled with its results
 
 
 def _working_tree_order(path, run_key, **target):
@@ -408,7 +449,7 @@ def test_working_tree_records_git_identity_dirty_and_untouched(repo, tmp):
     docs = _run_working_tree(tmp, _working_tree_order(checkout / "bin", "wt-git", source_dir=str(checkout)), "wt-git")
     assert docs
     for doc in docs:
-        core.validate_result(doc)
+        assert core.check(doc, "measurement-result") == []
         assert doc["revision"]["key"] == repo["head"]
         assert doc["provenance"]["subject_dirty"] == "dirty"
         assert doc["provenance"]["subject_tree"] == identity_before["tree"] != repo["head"]
@@ -433,7 +474,7 @@ def test_working_tree_outside_git_falls_back_to_a_directory_hash(tmp):
     tree = runner.snapshot.directory_identity(plain)["tree"]  # taken before the run, as the runner does
     docs = _run_working_tree(tmp, _working_tree_order(plain / "bin", "wt-dir", source_dir=str(plain)), "wt-dir")
     for doc in docs:
-        core.validate_result(doc)
+        assert core.check(doc, "measurement-result") == []
         assert doc["provenance"]["subject_dirty"] == "dirty"
         assert doc["provenance"]["subject_tree"] == tree
         assert doc["revision"]["key"] == f"directory-{tree}"

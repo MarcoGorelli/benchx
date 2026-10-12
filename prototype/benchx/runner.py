@@ -7,17 +7,19 @@ of a case it did run is a result.
 
 import os
 import urllib.parse
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 
 from . import __version__, adapters, core, snapshot
 from . import target as target_mod
 from .adapters.base import Unsupported
+from .core import Refusal, Rejected
 
 RUNNER = {"name": "benchx-prototype", "version": __version__}
 
 
-class Refused(Exception):
+class Refused(Rejected):
     """The order cannot be carried out as written; nothing was run."""
 
 
@@ -62,42 +64,45 @@ def _artifact(kind, media_type, path: Path) -> dict:
             "sha256": core.sha256_hex(path.read_bytes())}
 
 
-def check(order: dict) -> None:
-    """Refuse what the prototype cannot apply exactly."""
-    core.validate_order(order)
+def check(order: dict) -> Iterator[Refusal]:
+    """Everything in a valid order the prototype cannot apply exactly."""
     if len(order["suites"]) != 1:
-        raise Refused("exactly one suite per order is supported")
+        yield Refusal("exactly one suite per order is supported")
     suite = order["suites"][0]
     adapter = adapters.get(suite["adapter"])
     if adapter is None:
-        raise Refused(f"no adapter for {suite['adapter']!r}")
+        yield Refusal(f"no adapter for {suite['adapter']!r}")
     if order["target"]["kind"] not in ("build", "working_tree"):
-        raise Refused(f"only build and working_tree targets are supported; {order['target']['kind']!r} is deferred")
+        yield Refusal(f"only build and working_tree targets are supported; {order['target']['kind']!r} is deferred")
     if "benchmark" in order:
-        raise Refused("only benchmarks in the subject's own checkout are supported")
+        yield Refusal("only benchmarks in the subject's own checkout are supported")
     if "include" in suite or "exclude" in suite:
-        raise Refused("only a single suites[].filter is supported, not include/exclude")
-    if "workload_parameters" in order and not adapter.WORKLOAD_PARAMETERS:
-        raise Refused(f"{adapter.NAME} takes no workload_parameters")
-    unknown = set(order["quantities"]) - set(adapter.QUANTITIES)
-    if unknown:
-        raise Refused(f"quantities not supported: {sorted(unknown)}")
+        yield Refusal("only a single suites[].filter is supported, not include/exclude")
+    if adapter is not None:
+        if "workload_parameters" in order and not adapter.WORKLOAD_PARAMETERS:
+            yield Refusal(f"{adapter.NAME} takes no workload_parameters")
+        unknown = set(order["quantities"]) - set(adapter.QUANTITIES)
+        if unknown:
+            yield Refusal(f"quantities not supported: {sorted(unknown)}")
     for field, what in DEFERRED.items():
         if field in order:
-            raise Refused(f"{field} is deferred in the prototype: {what}")
-    try:
-        adapter.protocol(order["precision"])
-    except Unsupported as e:
-        raise Refused(str(e)) from None
+            yield Refusal(f"{field} is deferred in the prototype: {what}")
+    if adapter is not None:
+        try:
+            adapter.protocol(order["precision"])
+        except Unsupported as e:
+            yield from e.problems
 
 
 def run(order_path, out_dir) -> dict:
     """Execute one order; write results and the order into out_dir."""
-    order = core.load(order_path)
-    try:
-        check(order)
-    except core.DocumentError as e:
-        raise Refused(e.message) from None
+    inspection = core.inspect(Path(order_path), "work-order")
+    if inspection.data is None:
+        raise Refused(inspection.errors)
+    order = inspection.data
+    refusals = list(check(order))
+    if refusals:
+        raise Refused(refusals)
     adapter = adapters.get(order["suites"][0]["adapter"])
     applied_protocol, invocation = adapter.protocol(order["precision"])
 
@@ -106,7 +111,7 @@ def run(order_path, out_dir) -> dict:
     try:
         runnable = adapter.locate(target_path, order["suites"][0]["suite"], child_env)
     except Unsupported as e:
-        raise Refused(str(e)) from None
+        refusals += e.problems
     if order["target"]["kind"] == "working_tree":
         # The tree is the code: inspect it as found, dirty or not, never clean or check it out.
         source_dir = order["target"].get("source_dir") or target_path
@@ -118,7 +123,9 @@ def run(order_path, out_dir) -> dict:
         configuration = snapshot.cmake_configuration(target_path)
     if source is None:
         # runner.md §2: a result that cannot state its revision is a defect.
-        raise Refused("cannot locate the checkout the target was built from; set target.source_dir")
+        refusals.append(Refusal("cannot locate the checkout the target was built from; set target.source_dir"))
+    if refusals:
+        raise Refused(refusals)
 
     parameters = dict(order.get("environment_variables", {}))
     environment = snapshot.environment()
@@ -144,7 +151,7 @@ def run(order_path, out_dir) -> dict:
     try:
         cases = adapter.list_cases(runnable, order["suites"][0].get("filter"), child_env)
     except Unsupported as e:
-        raise Refused(str(e)) from None
+        raise Refused(e.problems) from None
     written = []
     for index, case in enumerate(cases):
         stem = f"{index:04d}"
@@ -231,15 +238,16 @@ def run(order_path, out_dir) -> dict:
             warnings = ([setup_warning] if setup_warning else []) + case_warnings
             if warnings:
                 document["quality"] = {"warnings": warnings}
-            try:
-                core.validate_result(document)
-            except core.DocumentError as e:
+            errors = core.check(document, "measurement-result")
+            if errors:
                 # harness-adapter.md §4.1: never drop a case, never emit an invalid document.
                 document["measurement"] = {"status": "error", "reason": "adapter.mapping-failed"}
-                document["provenance"]["info"]["mapping_error"] = e.message
+                document["provenance"]["info"]["mapping_error"] = str(errors[0])
                 document["procedure"] = {k: v for k, v in procedure.items()
                                          if k not in ("inner_iterations", "completed_repetitions", "repetition_levels")}
-                core.validate_result(document)
+                errors = core.check(document, "measurement-result")
+                if errors:
+                    raise RuntimeError(f"the error result is itself invalid: {errors[0]}")
             path = out_dir / file_name(key)
             path.write_bytes(core.canonical(document))
             written.append(path)

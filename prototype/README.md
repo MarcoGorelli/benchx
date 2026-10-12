@@ -21,6 +21,7 @@ bx compare BASELINE CONTENDER --profile revisions|environments
            [--project P] [--label NAME=BASE,CONTENDER]
            [--run-key KEY] [--out DIR] [--no-build] [--k 3] [--json]
                                          # measure mode: run both sides, then compare
+bx validate <file>… [--kind KIND]        # every problem in each document, by schema and rules
 ```
 
 Each target is `BUILD_DIR[:SOURCE_DIR]` or `@CONFIG[=SOURCE_REF]`. Two targets
@@ -85,7 +86,7 @@ records the allowlisted variables it inherited beside your declaration.
 
 ```console
 $ uv venv && uv pip install -e '.[test]'   # editable: schemas are read from ../schemas
-$ .venv/bin/python -m pytest tests     # 64 tests, fake Google Benchmark binary, no compiler
+$ .venv/bin/python -m pytest tests     # 222 tests, fake Google Benchmark binary, no compiler
 $ ./demo.sh                             # real builds; needs cmake, a C++ compiler, network once
 ```
 
@@ -124,7 +125,13 @@ repetitions, does not.
 
 ```
 benchx/
-  core.py            strict JSON, schema validation, canonical form, order reference
+  core/              reading and checking documents; problems are returned, not raised
+    loader.py        strict JSON: duplicate keys, non-finite and inexact numbers
+    catalog.py       the schemas, by kind and version
+    validation.py    which schema a document declares, and whether it fits
+    rules.py         what the result and work-order schemas cannot express
+    errors.py        every problem, with its schema §5.4 rejection code
+    hashing.py       canonical form, hashes, order reference
   snapshot.py        what the runner records (benchmark-environments.md §3)
   adapters/gbench.py Google Benchmark, driving and translating halves
   runner.py          one work order in, results out
@@ -140,5 +147,7 @@ examples/demo-suite  a two-benchmark Google Benchmark suite for the demo
 examples/archery-local  an end-to-end, Arrow-local-shaped example with a target provider (own README)
 tests/               test_prototype.py: the success criteria and the runner and store
                      rules, on a fake Google Benchmark binary; test_comparator.py: the
-                     comparator's invariants and method on hand-built results
+                     comparator's invariants and method on hand-built results;
+                     test_loader, test_validation, test_rules, test_pipeline,
+                     test_validate: core and `bx validate`, on the schema's examples
 ```

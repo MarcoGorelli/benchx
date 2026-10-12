@@ -16,6 +16,7 @@ import json
 from pathlib import Path
 
 from . import adapters, core
+from .core import loader
 from . import target as target_mod
 
 CONFIG_FILE = Path(".benchx") / "config.json"
@@ -40,11 +41,10 @@ def load(adapter_name, start="."):
     path = find(start)
     if path is None:
         return {}, None
-    try:
-        document = core.load(path)
-    except (core.DocumentError, OSError) as e:
-        raise ConfigError(f"{path}: {getattr(e, 'message', e)}") from None
-    if not isinstance(document, dict) or set(document) - {"adapters"}:
+    document, errors = loader.read(path)
+    if document is None:
+        raise ConfigError(f"{path}: " + "; ".join(str(error) for error in errors))
+    if set(document) - {"adapters"}:
         raise ConfigError(f'{path}: only "adapters" is allowed at the top level')
     adapter_blocks = document.get("adapters", {})
     if not isinstance(adapter_blocks, dict):
@@ -56,10 +56,10 @@ def load(adapter_name, start="."):
     if not isinstance(block, dict) or set(block) - {"precision"}:
         raise ConfigError(f'{path}: adapters.{adapter_name} may hold only "precision"')
     precision = block.get("precision", {})
-    try:
-        core.validate_precision({"repetitions": 1, **precision} if isinstance(precision, dict) else precision)
-    except core.DocumentError as e:
-        raise ConfigError(f"{path}: adapters.{adapter_name}.{e.message}") from None
+    errors = core.check_precision({"repetitions": 1, **precision} if isinstance(precision, dict) else precision)
+    if errors:
+        problems = "; ".join(str(error) for error in errors)
+        raise ConfigError(f"{path}: adapters.{adapter_name}.precision: {problems}")
     return precision, path
 
 
@@ -82,10 +82,9 @@ def resolve(adapter_name, flags=None, start="."):
     adapter = adapters.get(adapter_name)
     file_block, path = load(adapter_name, start)
     precision = merge(merge(adapter.default_precision(), file_block), flags or {})
-    try:
-        core.validate_precision(precision)
-    except core.DocumentError as e:
-        raise ConfigError(e.message) from None
+    errors = core.check_precision(precision)
+    if errors:
+        raise ConfigError("precision: " + "; ".join(str(error) for error in errors))
     return precision, path
 
 

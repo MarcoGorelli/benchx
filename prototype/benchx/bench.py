@@ -6,6 +6,7 @@ results to the local store, and summarize them as a table. Nothing is built or
 checked out; the tree is measured as found.
 """
 
+import json
 import re
 import statistics
 import uuid
@@ -84,10 +85,9 @@ def build_order(module, functions, *, tree=None, precision_flags=None, environme
         order["project"] = project
     if labels:
         order["labels"] = labels
-    try:
-        core.validate_order(order)
-    except core.DocumentError as e:
-        raise SessionError(e.message) from None
+    errors = core.check(order, "work-order")
+    if errors:
+        raise SessionError("; ".join(str(error) for error in errors))
     return order, config_path
 
 
@@ -95,7 +95,7 @@ def summarize(files) -> list[dict]:
     """One row per result document among `files`."""
     rows = []
     for path in files:
-        document = core.load(path)
+        document = json.loads(Path(path).read_text(encoding="utf-8"))
         if document.get("schema_version") == "benchx/work-order/0.1.0":
             continue
         measurement = document["measurement"]

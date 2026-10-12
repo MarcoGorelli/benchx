@@ -47,6 +47,11 @@ Optional hooks (the runner calls them when present)
                               attempt. For a harness that repeats at several levels.
 """
 
+from ..core import Refusal, Rejected
 
-class Unsupported(Exception):
+
+class Unsupported(Rejected):
     """An order this adapter cannot carry out as written; the runner refuses it."""
+
+    def __init__(self, *reasons: str) -> None:
+        super().__init__([Refusal(reason) for reason in reasons])
