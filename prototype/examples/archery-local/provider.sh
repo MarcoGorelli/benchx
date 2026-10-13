@@ -58,7 +58,7 @@ if [[ ! -d $SRC/.git ]]; then
 fi
 mkdir -p "$WORK/deps/lib"   # stand-in for the dependencies activate.sh points at
 
-step cmake -S "$SRC" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release -DFETCHCONTENT_BASE_DIR="$WORK/_deps" "${extra[@]}"
+step cmake -S "$SRC" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release -DFETCHCONTENT_BASE_DIR="$WORK/_deps" ${extra[@]+"${extra[@]}"}
 step cmake --build "$BUILD" -j
 
 BUILD=$BUILD SRC=$SRC HOW=$HOW CONFIGURATION=$configuration HERE=$HERE python3 - >"$BUILD/.benchx-target.json" <<'PY'
