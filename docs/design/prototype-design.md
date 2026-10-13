@@ -224,6 +224,11 @@ landing where its §3.4 puts it:
   §5.5); OS, kernel, libc, governor, and load as observed context; an
   allowlist of thread-control environment variables as observed context,
   which is the allowlist of `benchmark-environments.md` §3.1.
+  The `env` key reads differently by adapter. Google Benchmark takes the
+  runner's own environment and omits `env` when no allowlisted variable is set.
+  pyperf records what the workers actually had, so `env` is `{}` when the
+  capture worked and none was set, and absent only when nothing was captured
+  (`env-capture-missing`). Both are kept as they are.
 - **Source identity**, from `target.source_dir`, or from the
   `CMAKE_HOME_DIRECTORY` the build directory records when the order names
   none: revision, `subject_dirty`, and `subject_tree` (schema §4.1). When
