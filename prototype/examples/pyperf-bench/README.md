@@ -7,13 +7,14 @@ writes benchx result files, delivers them to a local store, and prints a table.
 ## Run it
 
 ```sh
-cd prototype/examples/pyperf-bench
-python3 -m pip install pyperf pyarrow jsonschema referencing rfc8785   # Python >= 3.11
-./run.sh
+cd prototype
+python3 -m venv .venv && . .venv/bin/activate    # Python >= 3.11, or any environment you like
+pip install -e . pyperf
+examples/pyperf-bench/run.sh
 ```
 
-`PYTHON=/path/to/python ./run.sh` picks another interpreter; pyperf must be importable
-by the `python` on your `PATH`, which is the one the workers use. Extra arguments go to
+The script runs `bx` and `python` from the active environment, so benchx and pyperf must
+be installed there; the workers use that same `python`. Extra arguments go to
 `bx bench` in step 1 and win over the config file, e.g. `./run.sh --processes 20`.
 It takes about 15 seconds. Nothing outside this directory changes: the local store is
 `out/home/store.parquet` (the script sets `BENCHX_HOME`), and `out/` is deleted at

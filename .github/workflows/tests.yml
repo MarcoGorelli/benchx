@@ -52,6 +52,4 @@ jobs:
 
       - name: Run the pyperf-bench example
         shell: bash
-        env:
-          PYTHON: python
         run: uv run --extra test --python ${{ matrix.python-version }} bash examples/pyperf-bench/run.sh

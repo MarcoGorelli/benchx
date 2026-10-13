@@ -4,18 +4,17 @@
 #   ./run.sh                 uses .benchx/config.json here (5 processes x 3 values)
 #   ./run.sh --processes 20  extra arguments go to `bx bench` and win over the file
 #
-# Needs Python >= 3.11 with pyperf, pyarrow, jsonschema, referencing, rfc8785.
-# PYTHON=/path/to/python picks the interpreter. Results go to ./out, and the
-# local store to ./out/home (BENCHX_HOME), so nothing outside this directory changes.
+# Run it in an activated environment that has benchx installed with pyperf
+# (from prototype/: `pip install -e . pyperf`, or `uv sync --extra test`).
+# Results go to ./out, and the local store to ./out/home (BENCHX_HOME), so
+# nothing outside this directory changes.
 set -euo pipefail
 cd "$(dirname "$0")"
-PYTHON=${PYTHON:-python3}
-export PYTHONPATH="$PWD/../..${PYTHONPATH:+:$PYTHONPATH}"
 export BENCHX_HOME="$PWD/out/home"
-bx() { printf '\033[36m$ bx %s\033[0m\n' "$*" >&2; "$PYTHON" -m benchx.cli "$@"; }
+bx() { printf '\033[36m$ bx %s\033[0m\n' "$*" >&2; command bx "$@"; }
 
-"$PYTHON" -c "import pyperf, pyarrow, jsonschema, referencing, rfc8785" 2>/dev/null || {
-  echo "missing dependencies: $PYTHON -m pip install pyperf pyarrow jsonschema referencing rfc8785" >&2
+command bx --help >/dev/null 2>&1 && python -c "import pyperf" 2>/dev/null || {
+  echo "missing dependencies: install benchx and pyperf into the active environment (see README.md)" >&2
   exit 1; }
 rm -rf out; mkdir -p out
 
