@@ -31,14 +31,14 @@ installed). From the repository root:
 
 ```console
 $ cd prototype
-$ uv venv && uv pip install -e '.[test]'      # or any virtualenv with `pip install -e .`
-$ cd examples/archery-local
-$ ./run.sh
+$ python3 -m venv .venv && . .venv/bin/activate    # Python >= 3.11, or any environment you like
+$ pip install -e .
+$ examples/archery-local/run.sh
 ```
 
 It takes about two minutes the first time (two CMake builds and a measured
-run) and prints every command before running it, as you would type it. With
-another interpreter: `PYTHON=/path/to/python ./run.sh`. More rounds:
+run) and prints every command before running it, as you would type it. The
+script runs `bx` and `python` from the active environment. More rounds:
 `ROUNDS=10 ./run.sh`.
 
 Everything it creates is under `_work/` in this directory, including the local
@@ -96,8 +96,7 @@ over.
 ## Try it by hand
 
 After `./run.sh` (the build directories and the store stay in `_work/`). From
-this directory, with the virtualenv's `bx` on your `PATH` or as
-`../../.venv/bin/python -m benchx.cli`:
+this directory, with the environment still active:
 
 ```console
 $ source activate.sh
