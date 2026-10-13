@@ -245,6 +245,11 @@ the same way report the same configuration. Nobody declared these, so the detect
   values are recorded as the intended ones in `coordinates.subject.configuration`
   (§3.4). This is what makes the hardened and plain directories differ in
   coordinates, which the `environments` profile requires.
+  The pyperf adapter's `python_cflags` is the exception to "never paths": it is
+  recorded verbatim in `comparison_context.runtime`, as `harness-adapter.md` §6.8
+  has it, so the same Python build installed under two prefixes reports different
+  flags (conda adds its `-isystem` and `-fdebug-prefix-map` paths) and lands in
+  different series.
 - **Declared facts**, from `.benchx/setup.json` or `BENCHX_SETUP_FILE`
   (`harness-adapter.md` §5.1), for what the cache cannot tell, such as how a
   dependency was installed. The prototype has no placement rules, so they
