@@ -16,7 +16,7 @@ examples/pyperf-bench/run.sh
 The script runs `bx` and `python` from the active environment, so benchx and pyperf must
 be installed there; the workers use that same `python`. Extra arguments go to
 `bx bench` in step 1 and win over the config file, e.g. `./run.sh --processes 20`.
-It takes about 15 seconds. Nothing outside this directory changes: the local store is
+It takes about 20 seconds. Nothing outside this directory changes: the local store is
 `out/home/store.parquet` (the script sets `BENCHX_HOME`), and `out/` is deleted at
 the start of each run.
 
@@ -75,8 +75,13 @@ It is the work-order `precision` block under the adapter's name:
 1. `bx bench bench_suite.py` runs all five cases with the config file's precision.
 2. `bx bench bench_suite.py bench_env_var -e EXAMPLE_N=100000 --processes 3 --values 2`
    runs one case, sets a variable for the workers, and overrides the file's process count.
-3. `bx head` lists the latest rows in the local store.
-4. It lists the files written.
+3. `bx bench bench_suite.py bench_join --run-key example-again` runs one case a second time
+   under a new run key, so its series gets a second point.
+4. `ls -l` and `bx head` show the local store: one Parquet file, and its latest rows.
+5. `bx series` lists the series in the store.
+6. `bx history` lists the points of the `bench_join` series, one per run. The script fails
+   if there are not two, which is what CI relies on.
+7. It lists the files written.
 
 ## What comes out
 
@@ -104,9 +109,27 @@ Files, under `out/all/` and `out/env/`:
   script that ran the function; `.worker-env.json`: the environment a worker really had;
   `.stdout` and `.stderr`.
 
-The local store, `out/home/store.parquet`, holds the results. Read it back with
-`bx head`, `bx series`, `bx history`, or `bx ingest` more result files; comparing two
-runs is not part of this step.
+The local store, `out/home/store.parquet`, holds the results. `run.sh` reads it back
+(your numbers and fingerprints will differ):
+
+```
+$ bx series
+d780c9564c72  local/be8372c04606  bench_dict_build  wall-time [s]  est=benchx/median/v1
+e6eaa02c8309  local/be8372c04606  bench_env_var  wall-time [s]  est=benchx/median/v1
+4be59ef6debc  local/be8372c04606  bench_join  wall-time [s]  est=benchx/median/v1
+...
+85a6aa9c6996  local/be8372c04606  bench_env_var  wall-time [s]  est=benchx/median/v1
+
+$ bx history 4be59ef6debc
+revision order unavailable without a revision graph; listed by measurement start
+d83d37b69010  2026-10-13T11:04:28.656515Z  3.32107e-06 (server)  example-all:bench_join:wall-time
+d83d37b69010  2026-10-13T11:04:39.045277Z  3.76987e-06 (server)  example-again:bench_join:wall-time
+```
+
+`bench_env_var` has two series because step 2 sets `EXAMPLE_N`, which changes the
+environment the case ran in. `bench_join` has one series with two points, one for each
+run key. You can also `bx ingest` more result files; comparing two runs is not part of
+this step.
 
 ## Notes
 

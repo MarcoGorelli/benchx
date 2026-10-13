@@ -25,8 +25,24 @@ echo; echo "== 2. one function, an environment variable set for the workers, fla
 bx bench bench_suite.py bench_env_var -e EXAMPLE_N=100000 --processes 3 --values 2 \
   --run-key example-env --out out/env
 
-echo; echo "== 3. what is in the local store"
+echo; echo "== 3. the same case again under a new run key, so its series gets a second point"
+bx bench bench_suite.py bench_join --run-key example-again --out out/again
+
+echo; echo "== 4. what is in the local store: one Parquet file"
+ls -l "$BENCHX_HOME/store.parquet"
 bx head -n 10
 
-echo; echo "== 4. what was written"
-find out/all out/env -type f | sort | sed 's/^/  /'
+echo; echo "== 5. its series (bench_env_var has two: the -e setting changes the environment)"
+bx series > out/series.txt
+cat out/series.txt
+
+echo; echo "== 6. the history of bench_join: one point per run"
+bx series --workload bench_join > out/join-series.txt
+SERIES=$(awk 'NR == 1 {print $1}' out/join-series.txt)
+[ -n "$SERIES" ] || { echo "no bench_join series in the store" >&2; exit 1; }
+bx history "$SERIES" > out/history.txt
+cat out/history.txt
+[ "$(grep -c example- out/history.txt)" -eq 2 ] || { echo "expected two history points for $SERIES" >&2; exit 1; }
+
+echo; echo "== 7. what was written"
+find out/all out/env out/again -type f | sort | sed 's/^/  /'
