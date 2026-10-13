@@ -100,7 +100,9 @@ such as `env-mismatch`.
 
 Files, under `out/all/` and `out/env/`:
 
-- `<run-key>_<case>_wall-time.json`: one benchx result per case (schema `measurement-result`):
+- `<run-key>_<case>_wall-time.json`: one benchx result per case (schema `measurement-result`;
+  with `-e` the name also carries the percent-encoded parameters, as in
+  `example-env_bench_env_var_%7B%22EXAMPLE_N%22%3A%22100000%22%7D_wall-time.json`):
   the observations grouped by worker process, the pyperf protocol that applied, the
   environment, the revision of the tree, and warnings.
 - `workorder-<hash>.json`: the work order that was run, and `orders/order.json`, the

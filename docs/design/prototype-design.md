@@ -21,23 +21,26 @@ bx series [--workload … --quantity …]    # list series
 bx history <series>                      # one series' points (a query)
 bx head [-n 10] [--json]                 # the latest results in the store, newest first
 bx compare --run KEY --profile revisions|environments --baseline VALUE
-           [--label NAME] [--results DIR] [--k 3] [--json]
+           [--label NAME] [--results DIR] [--k 3] [--min-rounds 3] [--json]
                                          # read mode: compare results already measured
+bx target describe|prepare TARGET        # a target's description (a provider's answer, or a build directory's sidecar)
 bx compare BASELINE CONTENDER --profile revisions|environments
            --suite NAME [--filter REGEX] [--quantity wall-time]
            --rounds R [--repetitions N] [--min-time S]
            [--project P] [--label NAME=BASE,CONTENDER]
-           [--run-key KEY] [--out DIR] [--k 3] [--json]
+           [--run-key KEY] [--out DIR] [--no-build] [--source-uri URI]
+           [--k 3] [--min-rounds 3] [--json]
                                          # measure mode: run both sides, then compare
 ```
 
 `bx compare` has two modes, chosen by its arguments. Two positional targets
-(`BUILD_DIR[:SOURCE_DIR]`) mean measure mode; `--run` means read mode; giving
+(`BUILD_DIR[:SOURCE_DIR]` or `@CONFIG[=SOURCE_REF]`, a call to the project's
+target provider) mean measure mode; `--run` means read mode; giving
 both or neither is an error, as is a flag that belongs to the other mode
 (`--baseline` and `--results` are read mode only, since measure mode derives
 the baseline from its first target; `--suite`, `--rounds`, `--project`,
-`--run-key`, `--out`, `--repetitions`, and `--min-time` are measure mode
-only). `--label` names the label in read mode, and carries the two values in
+`--run-key`, `--out`, `--repetitions`, `--min-time`, `--no-build`, and
+`--source-uri` are measure mode only). `--label` names the label in read mode, and carries the two values in
 measure mode. §5 describes measure mode.
 
 The CLI is a thin layer: each command is one call into the `benchx` package,
@@ -380,9 +383,15 @@ compares them; it is the workbench's session loop (`system-decomposition.md`
    first value of `--label NAME=BASE,CONTENDER` for `environments`.
 
 It is exactly `bx run` 2R times followed by read-mode `bx compare`; it adds no
-document, schema, or contract. It builds nothing: both targets must exist,
-and whatever produced them plays the target-provider role
-(`system-decomposition.md` §3.4). If it stops partway, the results already
+document, schema, or contract. It builds nothing itself: both targets must exist
+when it looks. A target given as `@CONFIG` is first requested from the
+project's target provider (`system-decomposition.md` §3.4), which `prepare`s
+it (and may build it) or, with `--no-build`, only `describe`s it; a target
+given as a build directory is read from its `.benchx-target.json` sidecar if
+it has one. The description's declared text (`how_built`, `activation`,
+`shell`, `provider`) is copied into each order, recorded in each result's
+`provenance.info`, and shown in the comparison; it is never executed or
+checked. If it stops partway, the results already
 delivered stay in the store, and a read-mode comparison of the run key reports
 missing results or a failed alternation invariant, as UC-03 §10 requires.
 Allowing a local-only `revisions` comparison of a dirty tree is open
@@ -394,7 +403,10 @@ Both profiles use one shape: two prepared build directories, one run key, R
 rounds, and `bx compare` in measure mode, which alternates the sides and
 assigns `round` and `slot`. The demo script plays the user, and in that role
 the target provider: it prepares the sources and build directories with git
-and CMake, since benchx builds nothing.
+and CMake, since benchx builds nothing. `prototype/examples/archery-local`
+shows the other route, where a provider script named in
+`.benchx/provider.json` builds and describes the targets and the sides are
+given as `@plain` and `@hardened`.
 
 - **Revisions:** two git worktrees of one source at the base and head
   commits, each built into its own directory with the same configuration.
@@ -429,8 +441,12 @@ history grow from run to run, and the demo ends with `bx head`.
   prepares both sides (`benchmark-environments.md` §2). The prototype applies
   `environment_variables` and defers the rest of the environment policy, and it
   refuses an order that names one rather than ignoring it (§3).
-- No target-provider hook: the demo prepares its builds by hand, and the
-  provider contract is open (`system-decomposition.md` §6 question 5).
+- The target-provider hook is minimal: one provider command per project
+  (`.benchx/provider.json`), `describe` and `prepare` only, `build` targets
+  only, and a source ref other than `WORKSPACE` is the provider's business.
+  How cached builds are named and expired stays open
+  (`system-decomposition.md` §6 question 5). The demo prepares its builds by
+  hand.
 - Environment identity is the snapshot's host name, CPU model, and core
   count; continuity events, quarantine, and artifact storage are absent.
 - One identity policy and one derived estimator, fixed in code.

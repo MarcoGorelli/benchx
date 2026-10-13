@@ -13,6 +13,7 @@ target-provider role.
 """
 
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -45,12 +46,24 @@ def parse_label(text: str) -> tuple[str, str, str]:
     return name, base, contender
 
 
+_SCP_REMOTE = re.compile(r"^(?:(?P<user>[^@/:\s]+)@)?(?P<host>[^@/:\s]+):(?P<path>[^/\s].*)$")
+
+
+def _scp_to_uri(remote: str) -> str:
+    """git's SCP-style `user@host:path` as an `ssh://` URI; anything else unchanged."""
+    match = _SCP_REMOTE.match(remote) if "://" not in remote else None
+    if not match:
+        return remote
+    user = f"{match['user']}@" if match["user"] else ""
+    return f"ssh://{user}{match['host']}/{match['path']}"
+
+
 def _source_uri(source_dir: str) -> str:
     """One canonical URI for every worktree of a repository, so both sides of a
     comparison report the same source."""
     origin = snapshot._run(["git", "remote", "get-url", "origin"], cwd=source_dir)
     if origin:
-        return origin
+        return _scp_to_uri(origin)
     common = snapshot._run(["git", "rev-parse", "--git-common-dir"], cwd=source_dir)
     return Path(source_dir, common).resolve().parent.as_uri() if common else Path(source_dir).resolve().as_uri()
 

@@ -62,7 +62,8 @@ def cmd_bench(args):
         flags = bench_mod.flags_to_precision(args.processes, args.values, args.min_time, args.loops, args.warmups)
         order, config_path = bench_mod.build_order(
             args.module, args.functions, tree=args.tree, precision_flags=flags, environment_variables=env,
-            project=args.project, run_key=args.run_key, case_s=args.case_timeout)
+            project=args.project, run_key=args.run_key, source_uri=args.source_uri,
+            case_s=args.case_timeout)
         out = Path(args.out) if args.out else Path("results") / order["run_key"]
         reps = {lv["unit"]: lv["n"] for lv in order["precision"]["repetitions"]["levels"]}
         print(f"precision: {reps['process']} processes x {reps['value']} values "
@@ -282,6 +283,7 @@ def main(argv=None):
                    help="set an environment variable for the benchmark (repeatable)")
     p.add_argument("--project", help="name a project, so results join its series; omit for an ad hoc run")
     p.add_argument("--run-key", help="default: bench-<UTC timestamp>")
+    p.add_argument("--source-uri", help="the source's URI (default: the checkout's origin remote)")
     p.add_argument("--out", help="directory for the order and result files (default ./results/RUN_KEY)")
     p.add_argument("--case-timeout", type=float, default=bench_mod.CASE_TIMEOUT_S,
                    help="seconds allowed per function (default %(default)s)")
