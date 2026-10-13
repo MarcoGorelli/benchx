@@ -1,14 +1,51 @@
 name: prototype tests
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "prototype/**"
+      - "schemas/**"
+      - ".github/workflows/**"
   pull_request:
     branches: [main]
+    paths:
+      - "prototype/**"
+      - "schemas/**"
+      - ".github/workflows/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: ${{ matrix.os }} / py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.11", "3.13"]
+    defaults:
+      run:
+        working-directory: prototype
     steps:
       - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: prototype/uv.lock
+
+      - name: Install Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install package and test dependencies
+        run: uv sync --extra test --python ${{ matrix.python-version }}
+
+      - name: Run tests
+        run: uv run --extra test --python ${{ matrix.python-version }} python -m pytest tests -ra
