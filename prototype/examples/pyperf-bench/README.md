@@ -137,7 +137,9 @@ this step.
 
 - The tree measured is the git checkout containing the module (here, this repository), as
   found, uncommitted changes included. The result records the revision and whether the tree
-  was dirty. Outside git, it records a hash of the directory's contents. `--tree DIR` picks
+  was dirty. Because that tree is the whole repository, an uncommitted change anywhere in it,
+  in a doc or another example as much as in `bench_suite.py`, makes the result `dirty` and
+  changes its tree id; commit or stash first for a clean result. Outside git, it records a hash of the directory's contents. `--tree DIR` picks
   the tree.
 - pyperf prints advice when the machine is noisy; it is in `.stderr`. On a laptop,
   close other programs. `python -m pyperf system tune` (needs root) quiets the CPU further.

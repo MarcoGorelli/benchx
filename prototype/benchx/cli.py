@@ -132,12 +132,16 @@ def cmd_head(args):
             print(row["document"])
         return EXIT_OK
     print(f"{store.path}: {total} result(s); latest {len(rows)}, newest first")
+    cells = []
     for r in rows:
         median = f"{r['median']:.6g} {r['unit']}" if r["median"] is not None else "-"
         started = r["started_at"].strftime("%Y-%m-%d %H:%M:%S")
         labels = f"  {r['labels']}" if r["labels"] else ""
-        print(f"{r['row']:>5}  {started}  {r['run_key']:<24} {r['workload']:<16} {r['quantity']:<9} "
-              f"{r['status']:<8} {median:<14} {r['revision'][:10]}  {r['project']}{labels}")
+        cells.append((f"{r['row']:>5}", started, r["run_key"], r["workload"], r["quantity"], r["status"], median,
+                      r["revision"][:10], f"{r['project']}{labels}"))
+    widths = [max([len(cell[i]) for cell in cells], default=0) for i in range(len(cells[0]))] if cells else []
+    for cell in cells:
+        print("  ".join(text.ljust(width) for text, width in zip(cell, widths)).rstrip())
     return EXIT_OK
 
 

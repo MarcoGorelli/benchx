@@ -22,6 +22,11 @@ bx compare BASELINE CONTENDER --profile revisions|environments
            [--run-key KEY] [--out DIR] [--no-build] [--k 3] [--json]
                                          # measure mode: run both sides, then compare
 bx validate <file>… [--kind KIND]        # every problem in each document, by schema and rules
+bx bench MODULE [FUNCTION …] [--processes N] [--values N] [--min-time S | --loops N] [--warmups N]
+         [-e NAME=VALUE] [--tree DIR] [--project P] [--run-key KEY] [--source-uri URI]
+         [--case-timeout S] [--out DIR] [--no-ingest]
+                                         # Python functions under pyperf: order → results → store → table
+bx config init [--dir DIR]               # write .benchx/config.json stating pyperf's defaults
 ```
 
 Each target is `BUILD_DIR[:SOURCE_DIR]` or `@CONFIG[=SOURCE_REF]`. Two targets
@@ -40,6 +45,18 @@ and into every result's `provenance.info`, shown in the comparison, and never
 executed or checked: you activate the environment yourself, and the runner
 records the allowlisted variables it inherited beside your declaration.
 `examples/archery-local` is a complete walk-through.
+
+`bx bench` is the other entry point: it benchmarks the functions of a Python file
+with [pyperf](https://pyperf.readthedocs.io), as one `working_tree` order for the
+checkout containing the module (uncommitted changes included, recorded as dirty).
+Each `bench_*` or `benchmark_*` function, or the ones named, is a case; `-e` sets
+environment variables for the workers and lands in the workload's parameters.
+Precision resolves as flags, then `.benchx/config.json` (found by walking up from the
+current directory; `bx config init` writes a template), then pyperf's defaults, and the
+resolved values are written into the order. The workers run the `python` first on
+`PATH`, which must have pyperf. It builds the order, runs it through the same runner and
+delivers to the same store as `bx run`; it has no comparison step.
+`examples/pyperf-bench` is a runnable walk-through.
 
 ## What it does
 
@@ -86,7 +103,7 @@ records the allowlisted variables it inherited beside your declaration.
 
 ```console
 $ uv venv && uv pip install -e '.[test]'   # editable: schemas are read from ../schemas
-$ .venv/bin/python -m pytest tests     # 222 tests, fake Google Benchmark binary, no compiler
+$ .venv/bin/python -m pytest tests     # 228 tests, fake Google Benchmark binary, no compiler
 $ ./demo.sh                             # real builds; needs cmake, a C++ compiler, network once
 ```
 
@@ -134,6 +151,9 @@ benchx/
     hashing.py       canonical form, hashes, order reference
   snapshot.py        what the runner records (benchmark-environments.md §3)
   adapters/gbench.py Google Benchmark, driving and translating halves
+  adapters/pyperf.py pyperf, both halves, for Python functions (bx bench)
+  bench.py           bx bench: module + flags + config.json → one working_tree work order
+  config.py          .benchx/config.json: the pyperf precision defaults and their template
   runner.py          one work order in, results out
   session.py         the session loop: alternate two targets over rounds, then compare
   target.py          target descriptions: the provider call, the sidecar, the declared text
@@ -144,6 +164,7 @@ benchx/
   cli.py             bx (compare has a read mode and a measure mode)
 ../schemas/          the result and work-order schemas, read in place ($BENCHX_SCHEMAS overrides)
 examples/demo-suite  a two-benchmark Google Benchmark suite for the demo
+examples/pyperf-bench  Python functions under `bx bench` (own README)
 examples/archery-local  an end-to-end, Arrow-local-shaped example with a target provider (own README)
 tests/               test_prototype.py: the success criteria and the runner and store
                      rules, on a fake Google Benchmark binary; test_comparator.py: the

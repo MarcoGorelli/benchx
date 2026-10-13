@@ -31,7 +31,24 @@ bx compare BASELINE CONTENDER --profile revisions|environments
            [--run-key KEY] [--out DIR] [--no-build] [--source-uri URI]
            [--k 3] [--min-rounds 3] [--json]
                                          # measure mode: run both sides, then compare
+bx bench MODULE [FUNCTION …] [--processes N] [--values N] [--min-time S | --loops N] [--warmups N]
+         [-e NAME=VALUE] [--tree DIR] [--project P] [--run-key KEY] [--source-uri URI]
+         [--case-timeout S] [--out DIR] [--no-ingest]
+                                         # Python functions under pyperf → result files → store → table
+bx config init [--dir DIR]               # write .benchx/config.json stating pyperf's defaults
 ```
+
+`bx bench` is a second front end to the same runner. It builds one work order
+whose target is the `working_tree` of the git checkout containing MODULE (or
+`--tree`), as found, with the dirty state and tree id recorded; the suite is the
+module, a case is a function in it (`bench_*` and `benchmark_*` by default, or the
+functions named), and `-e` fills `environment_variables`. Precision is resolved
+before the order is written, flags over `.benchx/config.json` (found by walking up
+from the current directory) over pyperf's defaults, so the order always states
+what applied. The pyperf adapter takes `python` from the `PATH` the workers start
+with and refuses the order if pyperf is not importable there. Delivery is as for
+`bx run`. There is no comparison step: `bx bench` produces results, and comparing
+them is not part of it.
 
 `bx compare` has two modes, chosen by its arguments. Two positional targets
 (`BUILD_DIR[:SOURCE_DIR]` or `@CONFIG[=SOURCE_REF]`, a call to the project's
@@ -65,9 +82,10 @@ not post to the original store.
 **Work order.** The prototype reads the work order of `runner-schema.md`
 (`schemas/work-order/0.1.0`, `benchx/work-order/0.1.0`) and defines no format
 of its own. One order is one side of one round: the runner executes one order
-per invocation (`runner.md` §7), and the prototype accepts one target kind,
-`build`, an existing build directory with an optional `source_dir`. The runner
-never builds it (`runner.md` §1).
+per invocation (`runner.md` §7), and the prototype accepts two target kinds:
+`build`, an existing build directory with an optional `source_dir`, and
+`working_tree`, a checkout measured as found, which only `bx bench` writes. The
+runner never builds either (`runner.md` §1).
 
 Interleaving needs two order fields. `round` is native to the schema and is
 copied to `procedure.round`. `slot`, the realized position across all sides,
@@ -437,7 +455,8 @@ history grow from run to run, and the demo ends with `bx head`.
 
 ## 7. Deliberate simplifications
 
-- One harness and one target kind. The runner builds nothing, ever: the user
+- Two harnesses (Google Benchmark, and pyperf through `bx bench`) and two target
+  kinds (`build`, `working_tree`). The runner builds nothing, ever: the user
   prepares both sides (`benchmark-environments.md` §2). The prototype applies
   `environment_variables` and defers the rest of the environment policy, and it
   refuses an order that names one rather than ignoring it (§3).
