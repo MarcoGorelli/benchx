@@ -78,7 +78,7 @@ def observed_context(child_env: dict, env_names=None) -> dict:
         facts["governor"] = governor
     try:
         facts["load_avg_1m"] = round(os.getloadavg()[0], 2)
-    except OSError:
+    except (OSError, AttributeError):  # AttributeError: no os.getloadavg on Windows
         pass
     env = {k: child_env[k] for k in (env_names or env_allowlist(child_env)) if k in child_env}
     if env:
