@@ -60,6 +60,14 @@ the baseline from its first target; `--suite`, `--rounds`, `--project`,
 `--source-uri` are measure mode only). `--label` names the label in read mode, and carries the two values in
 measure mode. §5 describes measure mode.
 
+A source URI given any way (`--source-uri`, a provider's description, the
+checkout's `origin`) goes through one normalization before sides are
+compared or recorded, and identity does the same: git's SCP-style
+`user@host:/abs/path` becomes `ssh://user@host/abs/path`, a relative
+`host:path` becomes `ssh://host/~/path` (relative to the login directory, so it
+is not mistaken for the absolute `/path`), and a local path becomes a
+`file://` URI. Windows drive paths and bracketed IPv6 hosts are recognized.
+
 The CLI is a thin layer: each command is one call into the `benchx` package,
 so the workbench, a CI script, or a notebook can do the same without a
 subprocess. Measure mode is a call into the session function, which calls the

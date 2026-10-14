@@ -178,3 +178,32 @@ def test_allowlist_covers_loader_variables_and_a_project_can_extend_it(monkeypat
     env["BENCHX_ENV_ALLOWLIST"] = "MY_TOOL_PREFIX, ,LD_LIBRARY_PATH"
     seen = snapshot.observed_context(env)["env"]
     assert seen == {"LD_LIBRARY_PATH": "/opt/lib", "MY_TOOL_PREFIX": "/x"}  # never the whole environment
+
+
+def _stub_sides(monkeypatch, uris):
+    sides = iter({"uri": u, "source": "/nonexistent", "identity": {"dirty": "clean"}, "text": {}} for u in uris)
+    monkeypatch.setattr(session, "_side", lambda *a, **k: next(sides))
+
+
+class _Stop(Exception):
+    pass
+
+
+def _compare(tmp):
+    return session.compare_targets("a", "b", profile="revisions", suite="s", rounds=1, store=Store(tmp / "s.parquet"),
+                                   run_key="u", out=tmp / "out")
+
+
+def test_equivalent_remote_spellings_are_one_source(monkeypatch, tmp):
+    _stub_sides(monkeypatch, ["git@host:/srv/x.git", "ssh://git@host/srv/x.git"])
+    monkeypatch.setattr(session.runner, "run", lambda *a, **k: (_ for _ in ()).throw(_Stop()))
+    monkeypatch.setattr(session, "_order", lambda *a, **k: {})
+    monkeypatch.setattr(session.json, "dumps", lambda *a, **k: "{}")
+    with pytest.raises(_Stop):  # got past the source-URI check
+        _compare(tmp)
+
+
+def test_different_sources_are_still_refused(monkeypatch, tmp):
+    _stub_sides(monkeypatch, ["git@host:/srv/x.git", "git@host:/srv/y.git"])
+    with pytest.raises(session.SessionError, match="different source URIs"):
+        _compare(tmp)
