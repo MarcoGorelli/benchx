@@ -5,6 +5,8 @@ import textwrap
 
 import pytest
 
+from benchx.identity import normalize_remote
+
 pytest.importorskip("pyperf")
 
 from benchx import bench, cli, core
@@ -99,3 +101,29 @@ def test_bench_rejects_a_missing_module_and_bad_env(tree, capsys):
     assert cli.main(["bench", "nope.py"]) == cli.EXIT_REFUSED
     assert cli.main(["bench", "mod.py", "-e", "NOEQUALS"]) == cli.EXIT_REFUSED
     assert not (tree / "results").exists()
+
+
+@pytest.mark.parametrize("remote, uri", [
+    ("git@github.com:ev-br/benchx.git", "ssh://git@github.com/~/ev-br/benchx.git"),
+    ("git@host:/srv/git/benchx.git", "ssh://git@host/srv/git/benchx.git"),
+    ("host:repos/x.git", "ssh://host/~/repos/x.git"),
+    ("git@[::1]:repo.git", "ssh://git@[::1]/~/repo.git"),
+    ("git@[::1]:/srv/repo.git", "ssh://git@[::1]/srv/repo.git"),
+    ("https://github.com/ev-br/benchx.git", "https://github.com/ev-br/benchx.git"),
+    ("ssh://git@github.com/ev-br/benchx.git", "ssh://git@github.com/ev-br/benchx.git"),
+    ("/srv/git/benchx.git", "file:///srv/git/benchx.git"),
+    ("C:\\src\\benchx", "file:///C:/src/benchx"),
+    ("file:///srv/git/benchx.git", "file:///srv/git/benchx.git"),
+])
+def test_remotes_become_uris(remote, uri):
+    assert normalize_remote(remote) == uri
+    assert normalize_remote(uri) == uri  # idempotent
+
+
+def test_relative_local_remotes_resolve_against_base(tmp_path):
+    assert normalize_remote("../upstream", base=str(tmp_path / "work")) == (tmp_path / "upstream").as_uri()
+
+
+def test_source_uri_flag_overrides_the_remote(tree):
+    order, _ = bench.build_order(tree / "mod.py", ["bench_a"], source_uri="https://example.org/r.git")
+    assert order["target"]["source"]["uri"] == "https://example.org/r.git"

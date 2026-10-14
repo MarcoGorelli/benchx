@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import config, core, runner, snapshot
+from .identity import normalize_remote
 from .session import CASE_TIMEOUT_S, ORDER_TIMEOUT_S, SessionError, _source_uri
 
 ADAPTER = "pyperf"
@@ -50,7 +51,7 @@ def flags_to_precision(processes=None, values=None, min_time=None, loops=None, w
 
 
 def build_order(module, functions, *, tree=None, precision_flags=None, environment_variables=None,
-                project=None, run_key=None, labels=None, case_s=CASE_TIMEOUT_S, order_s=ORDER_TIMEOUT_S, cwd="."):
+                project=None, run_key=None, labels=None, source_uri=None, case_s=CASE_TIMEOUT_S, order_s=ORDER_TIMEOUT_S, cwd="."):
     """The resolved work order, and the config file it read (or None)."""
     module = Path(module).resolve()
     if not module.is_file():
@@ -71,7 +72,7 @@ def build_order(module, functions, *, tree=None, precision_flags=None, environme
         "state": "resolved",
         "suites": [entry],
         "target": {"kind": "working_tree", "path": str(root), "source_dir": str(root),
-                   "source": {"uri": _source_uri(str(root)), "type": "git"}},
+                   "source": {"uri": normalize_remote(source_uri) if source_uri else _source_uri(str(root)), "type": "git"}},
         "quantities": ["wall-time"],
         "precision": precision,
         "timeouts": {"case_s": case_s, "order_s": order_s},

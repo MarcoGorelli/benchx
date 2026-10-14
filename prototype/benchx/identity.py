@@ -1,7 +1,9 @@
 """Fingerprints, the prototype identity policy, and series points (schema §4.3, §4.5)."""
 
+import re
 import statistics
 import urllib.parse
+from pathlib import Path
 
 from .core import canonical, sha256_hex
 
@@ -26,8 +28,33 @@ def reported_coordinates_fingerprint(doc: dict) -> str:
     return _hash("benchmark-reported-coordinates-v1", canonical(reported_coordinates(doc)))
 
 
+_WINDOWS_PATH = re.compile(r"^[A-Za-z]:[\\/]")
+_SCP_REMOTE = re.compile(r"^(?:(?P<user>[^@/:\s\[\]]+)@)?(?P<host>\[[0-9A-Fa-f:.]+\]|[^@/:\s\[\]]+):(?P<path>.+)$")
+
+
+def normalize_remote(remote: str, base: str | None = None) -> str:
+    """A git remote as a URI, whatever form it was given in; idempotent.
+
+    A `scheme://` remote is unchanged. A Windows drive path or a local path
+    (resolved against `base`, default the current directory) becomes a
+    `file://` URI. git's SCP-style `[user@]host:path` becomes `ssh://`: an
+    absolute path stays absolute, and a relative one (relative to the login
+    directory) is kept relative as `ssh://host/~/path`, since `ssh://host/path`
+    would name a different repository."""
+    if not remote or "://" in remote:
+        return remote
+    if _WINDOWS_PATH.match(remote):
+        return "file:///" + urllib.parse.quote(remote.replace("\\", "/"), safe="/:")
+    match = _SCP_REMOTE.match(remote)
+    if match:
+        user = f"{match['user']}@" if match["user"] else ""
+        path = match["path"] if match["path"].startswith("/") else "/~/" + match["path"]
+        return f"ssh://{user}{match['host']}{path}"
+    return Path(base or ".", remote).resolve().as_uri()
+
+
 def _normalize_uri(uri: str) -> str:
-    parts = urllib.parse.urlsplit(uri)
+    parts = urllib.parse.urlsplit(normalize_remote(uri))
     path = parts.path.rstrip("/").removesuffix(".git")
     return urllib.parse.urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, "", ""))
 

@@ -21,24 +21,52 @@ bx series [--workload … --quantity …]    # list series
 bx history <series>                      # one series' points (a query)
 bx head [-n 10] [--json]                 # the latest results in the store, newest first
 bx compare --run KEY --profile revisions|environments --baseline VALUE
-           [--label NAME] [--results DIR] [--k 3] [--json]
+           [--label NAME] [--results DIR] [--k 3] [--min-rounds 3] [--json]
                                          # read mode: compare results already measured
+bx target describe|prepare TARGET        # a target's description (a provider's answer, or a build directory's sidecar)
 bx compare BASELINE CONTENDER --profile revisions|environments
            --suite NAME [--filter REGEX] [--quantity wall-time]
            --rounds R [--repetitions N] [--min-time S]
            [--project P] [--label NAME=BASE,CONTENDER]
-           [--run-key KEY] [--out DIR] [--k 3] [--json]
+           [--run-key KEY] [--out DIR] [--no-build] [--source-uri URI]
+           [--k 3] [--min-rounds 3] [--json]
                                          # measure mode: run both sides, then compare
+bx bench MODULE [FUNCTION …] [--processes N] [--values N] [--min-time S | --loops N] [--warmups N]
+         [-e NAME=VALUE] [--tree DIR] [--project P] [--run-key KEY] [--source-uri URI]
+         [--case-timeout S] [--out DIR] [--no-ingest]
+                                         # Python functions under pyperf → result files → store → table
+bx config init [--dir DIR]               # write .benchx/config.json stating pyperf's defaults
 ```
 
+`bx bench` is a second front end to the same runner. It builds one work order
+whose target is the `working_tree` of the git checkout containing MODULE (or
+`--tree`), as found, with the dirty state and tree id recorded; the suite is the
+module, a case is a function in it (`bench_*` and `benchmark_*` by default, or the
+functions named), and `-e` fills `environment_variables`. Precision is resolved
+before the order is written, flags over `.benchx/config.json` (found by walking up
+from the current directory) over pyperf's defaults, so the order always states
+what applied. The pyperf adapter takes `python` from the `PATH` the workers start
+with and refuses the order if pyperf is not importable there. Delivery is as for
+`bx run`. There is no comparison step: `bx bench` produces results, and comparing
+them is not part of it.
+
 `bx compare` has two modes, chosen by its arguments. Two positional targets
-(`BUILD_DIR[:SOURCE_DIR]`) mean measure mode; `--run` means read mode; giving
+(`BUILD_DIR[:SOURCE_DIR]` or `@CONFIG[=SOURCE_REF]`, a call to the project's
+target provider) mean measure mode; `--run` means read mode; giving
 both or neither is an error, as is a flag that belongs to the other mode
 (`--baseline` and `--results` are read mode only, since measure mode derives
 the baseline from its first target; `--suite`, `--rounds`, `--project`,
-`--run-key`, `--out`, `--repetitions`, and `--min-time` are measure mode
-only). `--label` names the label in read mode, and carries the two values in
+`--run-key`, `--out`, `--repetitions`, `--min-time`, `--no-build`, and
+`--source-uri` are measure mode only). `--label` names the label in read mode, and carries the two values in
 measure mode. §5 describes measure mode.
+
+A source URI given any way (`--source-uri`, a provider's description, the
+checkout's `origin`) goes through one normalization before sides are
+compared or recorded, and identity does the same: git's SCP-style
+`user@host:/abs/path` becomes `ssh://user@host/abs/path`, a relative
+`host:path` becomes `ssh://host/~/path` (relative to the login directory, so it
+is not mistaken for the absolute `/path`), and a local path becomes a
+`file://` URI. Windows drive paths and bracketed IPv6 hosts are recognized.
 
 The CLI is a thin layer: each command is one call into the `benchx` package,
 so the workbench, a CI script, or a notebook can do the same without a
@@ -62,9 +90,10 @@ not post to the original store.
 **Work order.** The prototype reads the work order of `runner-schema.md`
 (`schemas/work-order/0.1.0`, `benchx/work-order/0.1.0`) and defines no format
 of its own. One order is one side of one round: the runner executes one order
-per invocation (`runner.md` §7), and the prototype accepts one target kind,
-`build`, an existing build directory with an optional `source_dir`. The runner
-never builds it (`runner.md` §1).
+per invocation (`runner.md` §7), and the prototype accepts two target kinds:
+`build`, an existing build directory with an optional `source_dir`, and
+`working_tree`, a checkout measured as found, which only `bx bench` writes. The
+runner never builds either (`runner.md` §1).
 
 Interleaving needs two order fields. `round` is native to the schema and is
 copied to `procedure.round`. `slot`, the realized position across all sides,
@@ -203,6 +232,11 @@ landing where its §3.4 puts it:
   §5.5); OS, kernel, libc, governor, and load as observed context; an
   allowlist of thread-control environment variables as observed context,
   which is the allowlist of `benchmark-environments.md` §3.1.
+  The `env` key reads differently by adapter. Google Benchmark takes the
+  runner's own environment and omits `env` when no allowlisted variable is set.
+  pyperf records what the workers actually had, so `env` is `{}` when the
+  capture worked and none was set, and absent only when nothing was captured
+  (`env-capture-missing`). Both are kept as they are.
 - **Source identity**, from `target.source_dir`, or from the
   `CMAKE_HOME_DIRECTORY` the build directory records when the order names
   none: revision, `subject_dirty`, and `subject_tree` (schema §4.1). When
@@ -219,6 +253,11 @@ the same way report the same configuration. Nobody declared these, so the detect
   values are recorded as the intended ones in `coordinates.subject.configuration`
   (§3.4). This is what makes the hardened and plain directories differ in
   coordinates, which the `environments` profile requires.
+  The pyperf adapter's `python_cflags` is the exception to "never paths": it is
+  recorded verbatim in `comparison_context.runtime`, as `harness-adapter.md` §6.8
+  has it, so the same Python build installed under two prefixes reports different
+  flags (conda adds its `-isystem` and `-fdebug-prefix-map` paths) and lands in
+  different series.
 - **Declared facts**, from `.benchx/setup.json` or `BENCHX_SETUP_FILE`
   (`harness-adapter.md` §5.1), for what the cache cannot tell, such as how a
   dependency was installed. The prototype has no placement rules, so they
@@ -380,9 +419,15 @@ compares them; it is the workbench's session loop (`system-decomposition.md`
    first value of `--label NAME=BASE,CONTENDER` for `environments`.
 
 It is exactly `bx run` 2R times followed by read-mode `bx compare`; it adds no
-document, schema, or contract. It builds nothing: both targets must exist,
-and whatever produced them plays the target-provider role
-(`system-decomposition.md` §3.4). If it stops partway, the results already
+document, schema, or contract. It builds nothing itself: both targets must exist
+when it looks. A target given as `@CONFIG` is first requested from the
+project's target provider (`system-decomposition.md` §3.4), which `prepare`s
+it (and may build it) or, with `--no-build`, only `describe`s it; a target
+given as a build directory is read from its `.benchx-target.json` sidecar if
+it has one. The description's declared text (`how_built`, `activation`,
+`shell`, `provider`) is copied into each order, recorded in each result's
+`provenance.info`, and shown in the comparison; it is never executed or
+checked. If it stops partway, the results already
 delivered stay in the store, and a read-mode comparison of the run key reports
 missing results or a failed alternation invariant, as UC-03 §10 requires.
 Allowing a local-only `revisions` comparison of a dirty tree is open
@@ -394,7 +439,10 @@ Both profiles use one shape: two prepared build directories, one run key, R
 rounds, and `bx compare` in measure mode, which alternates the sides and
 assigns `round` and `slot`. The demo script plays the user, and in that role
 the target provider: it prepares the sources and build directories with git
-and CMake, since benchx builds nothing.
+and CMake, since benchx builds nothing. `prototype/examples/archery-local`
+shows the other route, where a provider script named in
+`.benchx/provider.json` builds and describes the targets and the sides are
+given as `@plain` and `@hardened`.
 
 - **Revisions:** two git worktrees of one source at the base and head
   commits, each built into its own directory with the same configuration.
@@ -425,12 +473,17 @@ history grow from run to run, and the demo ends with `bx head`.
 
 ## 7. Deliberate simplifications
 
-- One harness and one target kind. The runner builds nothing, ever: the user
+- Two harnesses (Google Benchmark, and pyperf through `bx bench`) and two target
+  kinds (`build`, `working_tree`). The runner builds nothing, ever: the user
   prepares both sides (`benchmark-environments.md` §2). The prototype applies
   `environment_variables` and defers the rest of the environment policy, and it
   refuses an order that names one rather than ignoring it (§3).
-- No target-provider hook: the demo prepares its builds by hand, and the
-  provider contract is open (`system-decomposition.md` §6 question 5).
+- The target-provider hook is minimal: one provider command per project
+  (`.benchx/provider.json`), `describe` and `prepare` only, `build` targets
+  only, and a source ref other than `WORKSPACE` is the provider's business.
+  How cached builds are named and expired stays open
+  (`system-decomposition.md` §6 question 5). The demo prepares its builds by
+  hand.
 - Environment identity is the snapshot's host name, CPU model, and core
   count; continuity events, quarantine, and artifact storage are absent.
 - One identity policy and one derived estimator, fixed in code.

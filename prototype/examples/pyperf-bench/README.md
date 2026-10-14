@@ -100,7 +100,9 @@ such as `env-mismatch`.
 
 Files, under `out/all/` and `out/env/`:
 
-- `<run-key>_<case>_wall-time.json`: one benchx result per case (schema `measurement-result`):
+- `<run-key>_<case>_wall-time.json`: one benchx result per case (schema `measurement-result`;
+  with `-e` the name also carries the percent-encoded parameters, as in
+  `example-env_bench_env_var_%7B%22EXAMPLE_N%22%3A%22100000%22%7D_wall-time.json`):
   the observations grouped by worker process, the pyperf protocol that applied, the
   environment, the revision of the tree, and warnings.
 - `workorder-<hash>.json`: the work order that was run, and `orders/order.json`, the
@@ -135,7 +137,9 @@ this step.
 
 - The tree measured is the git checkout containing the module (here, this repository), as
   found, uncommitted changes included. The result records the revision and whether the tree
-  was dirty. Outside git, it records a hash of the directory's contents. `--tree DIR` picks
+  was dirty. Because that tree is the whole repository, an uncommitted change anywhere in it,
+  in a doc or another example as much as in `bench_suite.py`, makes the result `dirty` and
+  changes its tree id; commit or stash first for a clean result. Outside git, it records a hash of the directory's contents. `--tree DIR` picks
   the tree.
 - pyperf prints advice when the machine is noisy; it is in `.stderr`. On a laptop,
   close other programs. `python -m pyperf system tune` (needs root) quiets the CPU further.

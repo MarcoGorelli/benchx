@@ -59,7 +59,7 @@ bx compare @plain @hardened --profile environments --label build=plain,hardened 
   --suite demo-bench --rounds "$ROUNDS" --project archery-local --run-key "$RUN" --out _work/results
 
 step "the comparison names what was built and how; before, it was two opaque directory paths"
-echo "# the first work order's target, as the runner received it:"
+echo "# the target of work order 0001 (round 1, the hardened side), as the runner received it:"
 python -c '
 import json, sys
 print(json.dumps(json.load(open(sys.argv[1]))["target"], indent=1))' _work/results/orders/order-0001.json
