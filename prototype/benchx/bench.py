@@ -1,4 +1,5 @@
-"""`bx bench mod.py f g`: benchmark Python functions with pyperf (PYPERF_PLAN.md step 5).
+"""`bx bench mod.py f g`: benchmark Python functions with pyperf (PYPERF_PLAN.md step 5);
+`bx asv DIR`: an asv benchmark suite, through asv_runner.
 
 The workbench's part for a one-off: build one work order from the module, the
 config file, the flags and the environment variables, run it, deliver the
@@ -50,21 +51,53 @@ def flags_to_precision(processes=None, values=None, min_time=None, loops=None, w
     return precision
 
 
+def asv_precision(rounds=None, repeat=None, number=None, sample_time=None, warmup_time=None) -> dict:
+    """`bx asv`'s flags as a work-order `precision`: rounds are processes, repeat is values."""
+    if number is not None and sample_time is not None:
+        raise SessionError("--number and --sample-time both set calibration; give one")
+    precision = {}
+    levels = [{"unit": unit, "n": n} for unit, n in (("process", rounds), ("value", repeat)) if n is not None]
+    if levels:
+        precision["repetitions"] = {"mode": "fixed", "levels": levels}
+    if number is not None:
+        precision["calibration"] = {"mode": "fixed", "n_iterations": number}
+    if sample_time is not None:
+        precision["calibration"] = {"mode": "adaptive", "minimum_sample_seconds": sample_time}
+    if warmup_time is not None:
+        precision["warmup"] = {"mode": "time", "seconds": warmup_time} if warmup_time else {"mode": "none"}
+    return precision
+
+
+def asv_suite(path) -> Path:
+    """The benchmark directory named by `path`: a directory holding asv.conf.json
+    (its `benchmark_dir`, default `benchmarks`), or the benchmark directory itself."""
+    from .adapters import asv
+    path = Path(path).resolve()
+    for name in asv.CONF_NAMES:
+        if (path / name).is_file():
+            return (path / asv._read_conf(path / name).get("benchmark_dir", "benchmarks")).resolve()
+    return path
+
+
 def build_order(module, functions, *, tree=None, precision_flags=None, environment_variables=None,
-                project=None, run_key=None, labels=None, source_uri=None, case_s=CASE_TIMEOUT_S, order_s=ORDER_TIMEOUT_S, cwd="."):
-    """The resolved work order, and the config file it read (or None)."""
+                project=None, run_key=None, labels=None, source_uri=None, case_s=CASE_TIMEOUT_S, order_s=ORDER_TIMEOUT_S, cwd=".",
+                adapter=ADAPTER, case_regex=None):
+    """The resolved work order, and the config file it read (or None). For pyperf
+    `module` is a Python file; for asv, the benchmark directory."""
     module = Path(module).resolve()
-    if not module.is_file():
-        raise SessionError(f"no such module: {module}")
+    if not (module.is_dir() if adapter == "asv" else module.is_file()):
+        raise SessionError(f"no such {'benchmark directory' if adapter == 'asv' else 'module'}: {module}")
     root = tree_of(module, tree)
     try:
         suite = module.relative_to(root).as_posix()
     except ValueError:
         raise SessionError(f"{module} is not inside the tree {root}; give --tree") from None
-    precision, config_path = config.resolve(ADAPTER, precision_flags, start=cwd)
-    entry = {"adapter": ADAPTER, "suite": suite}
+    precision, config_path = config.resolve(adapter, precision_flags, start=cwd)
+    entry = {"adapter": adapter, "suite": suite}
     if functions:
         entry["filter"] = case_filter(functions)
+    if case_regex:
+        entry["filter"] = case_regex
     run_key = run_key or "bench-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     order = {
         "schema_version": "benchx/work-order/0.1.0",
@@ -101,8 +134,10 @@ def summarize(files) -> list[dict]:
             continue
         measurement = document["measurement"]
         values = [o["value"] for o in measurement.get("observations", [])]
+        workload = document["coordinates"]["workload"]
+        parameters = ", ".join(f"{k}={v}" for k, v in workload.get("parameters", {}).items())
         rows.append({
-            "case": document["coordinates"]["workload"]["name"],
+            "case": workload["name"] + (f" [{parameters}]" if parameters else ""),
             "status": measurement["status"] + (f" ({measurement['reason']})" if measurement.get("reason") else ""),
             "n": len(values),
             "median": statistics.median(values) if values else None,

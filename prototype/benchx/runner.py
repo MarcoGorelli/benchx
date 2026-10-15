@@ -171,6 +171,11 @@ def run(order_path, out_dir) -> dict:
             facts, case_warnings = adapter.observed_environment(run_, case, env_names)
             case_observed = {k: v for k, v in {**observed, **facts}.items() if v is not None}
         attempt_key = f"urn:benchx:attempt:{ref[7:23]}:{index}"
+        workload_name, case_parameters = (adapter.workload(case, runnable) if hasattr(adapter, "workload")
+                                          else (case, {}))
+        case_parameters = {**case_parameters, **parameters}
+        protocol = (adapter.case_protocol(applied_protocol, run_, case) if hasattr(adapter, "case_protocol")
+                    else applied_protocol)
 
         for output in adapter.translate(case, order["quantities"], run_, attempted):
             procedure = dict(output["procedure"], duration_seconds=round(run_["ended"] - run_["started"], 6))
@@ -201,14 +206,14 @@ def run(order_path, out_dir) -> dict:
                 provenance["subject_tree"] = provenance["benchmark_tree"] = source["tree"]
             if "labels" in order:
                 provenance["labels"] = order["labels"]
-            workload = {"name": case}
-            if parameters:
-                workload["parameters"] = parameters
+            workload = {"name": workload_name}
+            if case_parameters:
+                workload["parameters"] = case_parameters
             subject = {"name": _subject_name(order), "components": [{"role": "primary"}]}
             if configuration:
                 subject["configuration"] = configuration
             harness = adapter.harness(native_info)
-            key = ingest_key(order["run_key"], case, parameters, output["quantity"]["name"], slot)
+            key = ingest_key(order["run_key"], workload_name, case_parameters, output["quantity"]["name"], slot)
             document = {
                 "schema_version": 5,
                 "producer": adapter.PRODUCER,
@@ -225,7 +230,7 @@ def run(order_path, out_dir) -> dict:
                     "workload": workload,
                     "subject": subject,
                     "quantity": output["quantity"],
-                    "comparison_context": {"harness": harness, "protocol": applied_protocol,
+                    "comparison_context": {"harness": harness, "protocol": protocol,
                                            **(adapter.comparison_extras(native_info)
                                               if hasattr(adapter, "comparison_extras") else {})},
                     "environment": environment,

@@ -27,6 +27,10 @@ bx bench MODULE [FUNCTION …] [--processes N] [--values N] [--min-time S | --lo
          [--case-timeout S] [--out DIR] [--no-ingest]
                                          # Python functions under pyperf: order → results → store → table
 bx config init [--dir DIR]               # write .benchx/config.json stating pyperf's defaults
+bx asv [PATH] [-b REGEX] [--rounds N] [--repeat N] [--number N | --sample-time S] [--warmup-time S]
+       [-e NAME=VALUE] [--tree DIR] [--project P] [--run-key KEY] [--source-uri URI]
+       [--case-timeout S] [--out DIR] [--no-ingest]
+                                         # an asv benchmark suite through asv_runner: order → results → store → table
 ```
 
 Each target is `BUILD_DIR[:SOURCE_DIR]` or `@CONFIG[=SOURCE_REF]`. Two targets
@@ -57,6 +61,23 @@ resolved values are written into the order. The workers run the `python` first o
 `PATH`, which must have pyperf. It builds the order, runs it through the same runner and
 delivers to the same store as `bx run`; it has no comparison step.
 `examples/pyperf-bench` is a runnable walk-through.
+
+`bx asv` runs an [asv](https://asv.readthedocs.io) benchmark suite unchanged. PATH is
+a directory holding `asv.conf.json` (its `benchmark_dir` is the suite) or the
+benchmark directory itself. Benchmarks are discovered and run by `asv_runner`, the
+package asv itself runs them with, in the `python` first on `PATH`; asv's own
+environments, builds and results files are not used, so install the project you
+are measuring there. Each `time_*` benchmark and each of its parameter
+combinations is a case, with the parameters in `workload.parameters` as asv's
+`repr()` strings; other benchmark types, and modules that fail to import, are
+listed and skipped. Each case runs `setup_cache` once, then one process per round,
+from a scratch directory (an unbuilt checkout of the project cannot shadow the
+installed one). The flags override what each benchmark declares (`rounds` →
+processes, `repeat` → values, `number` or `sample_time` → calibration,
+`warmup_time` → warmup); what they leave out, asv decides per benchmark, and each
+result records its own case's protocol. Results also record the installed
+project's version (`observed_context.asv.project`) and asv's hash of the
+benchmark's code (`comparison_context.benchmark_version`).
 
 ## What it does
 
@@ -103,7 +124,7 @@ delivers to the same store as `bx run`; it has no comparison step.
 
 ```console
 $ uv venv && uv pip install -e '.[test]'   # editable: schemas are read from ../schemas
-$ .venv/bin/python -m pytest tests     # 228 tests, fake Google Benchmark binary, no compiler
+$ .venv/bin/python -m pytest tests     # 243 tests, fake Google Benchmark binary, no compiler
 $ ./demo.sh                             # real builds; needs cmake, a C++ compiler, network once
 ```
 
@@ -152,7 +173,8 @@ benchx/
   snapshot.py        what the runner records (benchmark-environments.md §3)
   adapters/gbench.py Google Benchmark, driving and translating halves
   adapters/pyperf.py pyperf, both halves, for Python functions (bx bench)
-  bench.py           bx bench: module + flags + config.json → one working_tree work order
+  adapters/asv.py    asv, both halves, driving asv_runner (bx asv)
+  bench.py           bx bench and bx asv: suite + flags + config.json → one working_tree work order
   config.py          .benchx/config.json: the pyperf precision defaults and their template
   runner.py          one work order in, results out
   session.py         the session loop: alternate two targets over rounds, then compare
