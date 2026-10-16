@@ -13,9 +13,11 @@ SCHEMAS = Path(
     os.environ.get("BENCHX_SCHEMAS") or Path(__file__).resolve().parents[3] / "schemas"
 )
 
-# Results declare an integer major version; this is the release shipped for each.
+# Results and comparisons declare an integer major version; this is the
+# release shipped for each.
 RELEASES = {
     "measurement-result": {5: "0.1.0"},
+    "comparison-document": {1: "0.1.0"},
 }
 RELEASE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 

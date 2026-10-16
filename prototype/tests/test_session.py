@@ -17,7 +17,7 @@ def builds(repo, tmp):
 
 
 def verdicts(doc):
-    return {u["workload"]: u["verdict"] for u in doc["units"]}
+    return {u["workload"]["name"]: u["verdict"] for u in doc["units"]}
 
 
 def test_session_alternates_delivers_and_compares(repo, tmp, builds):
@@ -25,7 +25,7 @@ def test_session_alternates_delivers_and_compares(repo, tmp, builds):
     doc = session.compare_targets(builds["baseline"], builds["contender"], profile="revisions",
                                   suite="demo-bench", rounds=6, store=store, run_key="s1", out=tmp / "out")
     assert doc["failed_invariants"] == [] and doc["missing"] == [] and doc["local_only"] is False
-    assert verdicts(doc) == {QUIET: "regressed", NOISY: "no change detected"}
+    assert verdicts(doc) == {QUIET: "regressed", NOISY: "no-change-detected"}
     by_slot = {}
     for d in store.documents("s1"):
         by_slot.setdefault(d["procedure"]["slot"], []).append(d)
@@ -45,7 +45,7 @@ def test_session_environments(repo, tmp):
                                   label=("build", "plain", "hardened"), project="demo",
                                   store=Store(tmp / "store.parquet"), run_key="e1", out=tmp / "out")
     assert doc["varying"] == "provenance.labels.build" and doc["failed_invariants"] == []
-    assert verdicts(doc) == {QUIET: "regressed", NOISY: "no change detected"}
+    assert verdicts(doc) == {QUIET: "regressed", NOISY: "no-change-detected"}
 
 
 def test_dirty_tree_refused_before_anything_runs(repo, tmp, builds):

@@ -51,9 +51,11 @@ def test_name_shared_by_environment_and_parameters():
     )
 
 
-def test_rules_not_implemented():
-    with pytest.raises(NotImplementedError, match="comparison-document"):
-        list(rules.check({}, "comparison-document"))
+@pytest.mark.parametrize(
+    "kind", ["comparison-document", "target-description", "target-provider-request"]
+)
+def test_kinds_without_rules(kind):
+    assert list(rules.check({}, kind)) == []
 
 
 def test_primary_source_mismatch(adhoc):
