@@ -20,7 +20,7 @@ def results(directory: Path) -> list[dict]:
 
 
 def verdicts(doc) -> dict:
-    return {u["workload"]: u["verdict"] for u in doc["units"]}
+    return {u["workload"]["name"]: u["verdict"] for u in doc["units"]}
 
 
 @pytest.fixture
@@ -59,9 +59,10 @@ def test_revisions_profile(revisions_run, repo, tmp):
     assert store.ingest_paths([revisions_run])["ingested"] == 24
     doc = compare.compare(store.documents("rev-1"), run_key="rev-1", profile="revisions",
                           baseline=repo["base"][:10])
+    assert core.check(doc, "comparison-document") == []
     assert doc["failed_invariants"] == [] and doc["missing"] == []
     # criterion 5: +2% on a quiet benchmark flags, +3% on a noisy one does not
-    assert verdicts(doc) == {QUIET: "regressed", NOISY: "no change detected"}
+    assert verdicts(doc) == {QUIET: "regressed", NOISY: "no-change-detected"}
     assert doc["local_only"] is False
     assert all(u["rounds"] == 6 for u in doc["units"])
 
@@ -72,7 +73,7 @@ def test_environments_profile(environments_run, tmp):
     doc = compare.compare(store.documents("env-1"), run_key="env-1", profile="environments", label="build",
                           baseline="plain")
     assert doc["varying"] == "provenance.labels.build"
-    assert verdicts(doc) == {QUIET: "regressed", NOISY: "no change detected"}
+    assert verdicts(doc) == {QUIET: "regressed", NOISY: "no-change-detected"}
 
 
 def test_environments_needs_a_real_difference(repo, tmp):
@@ -82,6 +83,7 @@ def test_environments_needs_a_real_difference(repo, tmp):
                            {"build": b, "source": repo["wt-head"], "labels": {"build": "b"}}],
                      rounds=3, run_key="same", out=tmp / "same")
     doc = compare.compare(results(out), run_key="same", profile="environments", label="build", baseline="a")
+    assert core.check(doc, "comparison-document") == []
     assert [f["invariant"] for f in doc["failed_invariants"]] == ["sides-differ"]
     assert doc["units"] == []
 
@@ -142,8 +144,7 @@ def test_missing_and_unequal(repo, tmp):
     out = run_rounds(tmp, [{"build": base, "source": repo["wt-base"]}, {"build": head, "source": repo["wt-head"]}],
                      rounds=3, run_key="miss", out=tmp / "miss")
     doc = compare.compare(results(out), run_key="miss", profile="revisions", baseline=repo["base"])
-    assert doc["missing"] == [{"workload": NOISY, "parameters": "{}", "quantity": "wall-time",
-                               "side": doc["contender"]}]
+    assert doc["missing"] == [{"workload": {"name": NOISY}, "quantity": "wall-time", "side": "contender"}]
     assert QUIET in verdicts(doc)
 
 

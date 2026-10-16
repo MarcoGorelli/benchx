@@ -6,6 +6,7 @@ benchx/paired-relative/v1. The document depends only on the input results,
 so the same results give the same document from any store.
 """
 
+import json
 import math
 import statistics
 
@@ -13,7 +14,7 @@ from . import identity
 from .core import canonical
 from .store import store_project
 
-METHOD = {"name": "benchx/paired-relative", "version": "v1", "estimator": "median"}
+METHOD = {"name": "benchx/paired-relative", "version": "v1", "effect_measure": "relative"}
 # Observed-context keys that change between any two attempts; not caveats.
 VOLATILE = {"load_avg_1m", "google_benchmark"}
 
@@ -66,7 +67,7 @@ def _estimate(doc):
 
 def _verdict(effect, noise, k, direction):
     if abs(effect) <= k * noise:
-        return "no change detected"
+        return "no-change-detected"
     if direction == "lower-is-better":
         return "regressed" if effect > 0 else "improved"
     if direction == "higher-is-better":
@@ -81,9 +82,9 @@ def compare(documents, *, run_key, profile, baseline, label=None, k=3.0, min_rou
         raise CompareError(f"no results for run {run_key!r}")
     sides, varying, problem = _sides(documents, profile, label)
     doc = {"comparison_version": 1, "mode": "run", "run_key": run_key, "profile": profile,
-           "varying": varying, "baseline": baseline, "contender": None,
-           "method": {**METHOD, "k": k, "min_rounds": min_rounds},
-           "identity_schema": identity.IDENTITY_SCHEMA,
+           "varying": varying, "baseline": baseline, "pairing": "procedure.round",
+           "method": {**METHOD, "configuration": {"k": k, "min_rounds": min_rounds}},
+           "estimator": dict(identity.MEDIAN), "identity_schema": identity.IDENTITY_SCHEMA,
            "local_only": any(d["provenance"][f] != "clean" for d in documents
                              for f in ("subject_dirty", "benchmark_dirty")),
            "units": [], "missing": [], "failed_invariants": [], "exclusions": [],
@@ -107,8 +108,8 @@ def compare(documents, *, run_key, profile, baseline, label=None, k=3.0, min_rou
         return doc
     contender = next(v for v in values if v != base)
     doc["contender"] = contender
-    doc["sides"] = {str(s): _declared(next(d for d, x in zip(documents, sides) if x == s))
-                    for s in (base, contender)}
+    doc["sides"] = {role: _declared(next(d for d, x in zip(documents, sides) if x == s))
+                    for role, s in (("baseline", base), ("contender", contender))}
 
     # Run-level invariants (schema §5.5, comparator.md §3).
     for path in _MUST_AGREE[profile]:
@@ -150,10 +151,12 @@ def compare(documents, *, run_key, profile, baseline, label=None, k=3.0, min_rou
         key = (c["workload"]["name"], _c(c["workload"].get("parameters", {})), c["quantity"]["name"])
         units.setdefault(key, {base: [], contender: []})[s].append(d)
     for (workload, parameters, quantity), by_side in sorted(units.items()):
-        where = {"workload": workload, "parameters": parameters, "quantity": quantity}
-        absent = [s for s in (base, contender) if not by_side[s]]
+        where = {"workload": {"name": workload, **({"parameters": json.loads(parameters)}
+                                                   if parameters != "{}" else {})},
+                 "quantity": quantity}
+        absent = [role for role, s in (("baseline", base), ("contender", contender)) if not by_side[s]]
         if absent:
-            doc["missing"].extend({**where, "side": s} for s in absent)
+            doc["missing"].extend({**where, "side": role} for role in absent)
             continue
         if len(by_side[base]) != len(by_side[contender]):
             doc["failed_invariants"].append({"invariant": "equal-attempts", **where,
@@ -163,8 +166,9 @@ def compare(documents, *, run_key, profile, baseline, label=None, k=3.0, min_rou
         for s in (base, contender):
             for d in by_side[s]:
                 if d["measurement"]["status"] != "success":
-                    doc["exclusions"].append({"ingest_key": d["ingest_key"], "status": d["measurement"]["status"],
-                                              "reason": d["measurement"].get("reason")})
+                    status, reason = d["measurement"]["status"], d["measurement"].get("reason")
+                    result = {"producer": d["producer"]["name"], "ingest_key": d["ingest_key"]}
+                    doc["exclusions"].append({"result": result, "reason": f"{status}: {reason}" if reason else status})
                     continue
                 rounds.setdefault(d.get("procedure", {}).get("round"), {})[s] = d
         pairs = [(r[base], r[contender]) for _, r in sorted(rounds.items(), key=lambda x: (x[0] is None, x[0]))
@@ -188,8 +192,7 @@ def _unit(where, pairs, by_side, base, contender, k, min_rounds):
     quantity = first[base]["coordinates"]["quantity"]
     unit = {**where, "series": {name: identity.series_fingerprint(first[s], store_project(first[s]), identity.MEDIAN)
                                 for name, s in (("baseline", base), ("contender", contender))},
-            "rounds": len(pairs), "reference_estimate": None, "effect": None, "noise": None,
-            "noise_source": "paired-rounds", "verdict": "indeterminate", "reason": None,
+            "rounds": len(pairs), "noise_source": "paired-rounds", "verdict": "indeterminate",
             "observed_context_differences": _differences(by_side[base], by_side[contender])}
     estimates = [(_estimate(b), _estimate(c)) for b, c in pairs]
     estimates = [(b, c) for b, c in estimates if b is not None and c is not None]
@@ -228,24 +231,25 @@ def _differences(a_docs, b_docs):
 def render(doc: dict) -> str:
     """The reviewer-speed table (comparator.md §5)."""
     lines = [f"run {doc['run_key']}  profile {doc['profile']}  "
-             f"baseline {str(doc['baseline'])[:12]}  contender {str(doc['contender'])[:12]}"
+             f"baseline {str(doc['baseline'])[:12]}  contender {str(doc.get('contender'))[:12]}"
              + ("  [local-only]" if doc["local_only"] else "")]
-    for name, side in doc.get("sides", {}).items():
+    for role, side in doc.get("sides", {}).items():
+        name = doc[role]
         for key in ("how_built", "activation", "observed_env"):
             if key in side:
                 shown = side[key] if key != "observed_env" else ", ".join(f"{k}={v}" for k, v in side[key].items())
                 first, *rest = str(shown).splitlines() or [""]
                 lines.append(f"  {name}: {key.replace('_', ' ')}: {first}" + (f" (+{len(rest)} lines)" if rest else ""))
-    for section in ("regressed", "improved", "changed", "no change detected", "indeterminate"):
+    for section in ("regressed", "improved", "changed", "no-change-detected", "indeterminate"):
         rows = [u for u in doc["units"] if u["verdict"] == section]
         if not rows:
             continue
-        lines.append(f"\n{section.upper()} ({len(rows)})")
+        lines.append(f"\n{section.replace('-', ' ').upper()} ({len(rows)})")
         for u in rows:
-            effect = f"{u['effect']:+8.2%}" if u["effect"] is not None else "       ?"
-            noise = f"{u['noise']:7.2%}" if u["noise"] is not None else "      ?"
-            reason = f"  ({u['reason']})" if u["reason"] else ""
-            lines.append(f"  {u['workload']:<32} {u['quantity']:<10} effect {effect}  noise {noise}"
+            effect = f"{u['effect']:+8.2%}" if "effect" in u else "       ?"
+            noise = f"{u['noise']:7.2%}" if "noise" in u else "      ?"
+            reason = f"  ({u['reason']})" if "reason" in u else ""
+            lines.append(f"  {u['workload']['name']:<32} {u['quantity']:<10} effect {effect}  noise {noise}"
                          f"  rounds={u['rounds']}{reason}")
     for key, title in (("missing", "missing"), ("failed_invariants", "failed invariants"),
                        ("exclusions", "excluded")):

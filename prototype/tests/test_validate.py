@@ -3,6 +3,7 @@ import json
 import pytest
 
 from benchx import cli
+from benchx.core import catalog
 
 
 @pytest.fixture
@@ -65,6 +66,15 @@ def test_kind_defaults_to_measurement_result_and_can_be_named(documents, adhoc, 
     code = cli.main(["validate", "--kind", "comparison-document", file])
     assert code == cli.EXIT_INVALID
     assert "expected a comparison-document" in capsys.readouterr().err
+
+
+def test_comparison_documents_are_validated(capsys):
+    examples = catalog.SCHEMAS / "comparison-document" / "0.1.0" / "examples"
+    files = sorted(str(path) for path in examples.glob("*.json"))
+    assert (
+        cli.main(["validate", "--kind", "comparison-document", *files]) == cli.EXIT_OK
+    )
+    assert capsys.readouterr().err.strip() == f"{len(files)}/{len(files)} valid"
 
 
 def test_unknown_kind_is_rejected_by_the_parser(documents, adhoc):

@@ -27,10 +27,12 @@ def check(data: dict[str, Any], kind: Kind) -> Iterator[RuleViolation]:
         yield from check_result(data)
     elif kind == "work-order":
         yield from check_order(data)
-    elif kind == "target-description" or kind == "target-provider-request":
+    elif (
+        kind == "comparison-document"
+        or kind == "target-description"
+        or kind == "target-provider-request"
+    ):
         return  # nothing beyond what their schemas say
-    elif kind == "comparison-document":
-        raise NotImplementedError(f"no rules for {kind} yet")
     else:
         assert_never(kind)
 

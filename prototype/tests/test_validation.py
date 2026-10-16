@@ -15,6 +15,7 @@ def check(data: dict) -> list[StructureError]:
     return list(validation.check(data, validator))
 
 
+COMPARISONS = catalog.SCHEMAS / "comparison-document" / "0.1.0" / "examples"
 SCHEMA_FILES = sorted(
     (kind.name, version.name, version / "schema.json")
     for kind in catalog.SCHEMAS.iterdir()
@@ -41,6 +42,24 @@ def test_lookup_is_cached():
 
 def test_lookup_of_missing_schema_is_none():
     assert catalog.lookup("measurement-result", 4) is None
+
+
+@pytest.mark.parametrize(
+    "file", sorted(COMPARISONS.glob("*.json")), ids=lambda path: path.stem
+)
+def test_comparison_examples_fit(file):
+    data = json.loads(file.read_text())
+    validator, errors = validation.find_schema(data, "comparison-document")
+    assert errors == [] and list(validation.check(data, validator)) == []
+
+
+def test_history_comparison_takes_no_run_fields():
+    data = json.loads((COMPARISONS / "history.json").read_text())
+    data["run_key"] = "rev-1"
+    validator, _ = validation.find_schema(data, "comparison-document")
+    [issue] = validation.check(data, validator)
+    # jsonschema reports a `false` subschema without its path or keyword.
+    assert issue.message == "False schema does not allow 'rev-1'"
 
 
 def test_finds_result_schema(adhoc):
@@ -76,6 +95,12 @@ def test_finds_result_schema(adhoc):
             "measurement-result",
             ("schema_version",),
             "no schema for measurement-result version 4",
+        ),
+        (
+            {"comparison_version": 2},
+            "comparison-document",
+            ("comparison_version",),
+            "no schema for comparison-document version 2",
         ),
         (
             {"schema_version": "benchx/work-order/9.0.0"},

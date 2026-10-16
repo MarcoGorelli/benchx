@@ -71,6 +71,19 @@
       "description": "Run mode: the target side. Absent when a failed invariant prevented identifying it.",
       "$ref": "#/$defs/side"
     },
+    "sides": {
+      "description": "Run mode: what each side declared about how it was built and entered, recorded as given and never judged, beside the environment the runner observed for it.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "baseline": {
+          "$ref": "#/$defs/declared"
+        },
+        "contender": {
+          "$ref": "#/$defs/declared"
+        }
+      }
+    },
     "pairing": {
       "description": "Run mode: how the two sides' attempts are paired.",
       "$comment": "Only paired comparison is defined; comparator.md open question 2 asks whether an unpaired method should be allowed.",
@@ -143,6 +156,7 @@
           "varying": false,
           "baseline": false,
           "contender": false,
+          "sides": false,
           "pairing": false,
           "failed_invariants": false,
           "units": {
@@ -378,6 +392,43 @@
       "description": "A value of the varying coordinate, such as a tree id, a label, or a parameter value.",
       "not": {
         "type": "null"
+      }
+    },
+    "declared": {
+      "description": "One side's declared text, copied from its results' provenance.info, and the allowlisted environment variables observed for it.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "how_built": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "activation": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "shell": {
+          "$ref": "#/$defs/token"
+        },
+        "target_provider": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name"
+          ],
+          "properties": {
+            "name": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "version": {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          }
+        },
+        "observed_env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
       }
     },
     "failedInvariant": {

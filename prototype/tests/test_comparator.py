@@ -8,7 +8,7 @@ import copy
 
 import pytest
 
-from benchx import compare
+from benchx import compare, core
 
 BASE, HEAD = "a" * 40, "b" * 40
 
@@ -51,7 +51,9 @@ def run(rounds=3, base_values=(1.0, 2.0, 3.0), ratio=1.1):
 
 
 def evaluate(docs, **kwargs):
-    return compare.compare(docs, run_key="run", profile="revisions", baseline=BASE, **kwargs)
+    doc = compare.compare(docs, run_key="run", profile="revisions", baseline=BASE, **kwargs)
+    assert core.check(doc, "comparison-document") == []
+    return doc
 
 
 def invariants(doc):
@@ -82,7 +84,7 @@ def test_equal_attempts():
     doc = evaluate(docs)
     assert invariants(doc) == ["equal-attempts"]
     assert [u["workload"] for u in doc["units"]] == []  # BM_W failed; BM_Other is missing on base
-    assert doc["missing"] == [{"workload": "BM_Other", "parameters": "{}", "quantity": "wall-time", "side": BASE}]
+    assert doc["missing"] == [{"workload": {"name": "BM_Other"}, "quantity": "wall-time", "side": "baseline"}]
 
 
 def test_two_sides():
@@ -105,7 +107,8 @@ def test_exclusions():
     docs = run(rounds=4, base_values=(1.0, 2.0, 3.0, 4.0))
     docs[2]["measurement"] = {"status": "error", "reason": "harness.error"}
     doc = evaluate(docs)
-    assert doc["exclusions"] == [{"ingest_key": docs[2]["ingest_key"], "status": "error", "reason": "harness.error"}]
+    result = {"producer": "benchx/gbench-adapter", "ingest_key": docs[2]["ingest_key"]}
+    assert doc["exclusions"] == [{"result": result, "reason": "error: harness.error"}]
     assert doc["units"][0]["rounds"] == 3
 
 
