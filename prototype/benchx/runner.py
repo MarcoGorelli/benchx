@@ -6,6 +6,7 @@ of a case it did run is a result.
 """
 
 import os
+import time
 import urllib.parse
 from collections.abc import Iterator
 from datetime import datetime, timezone
@@ -156,8 +157,11 @@ def run(order_path, out_dir) -> dict:
     for index, case in enumerate(cases):
         stem = f"{index:04d}"
         native_path = artifacts_dir / f"{stem}.native.json"
+        # The wall clock can step backwards mid-case (NTP, WSL2 resyncs): the duration comes from a monotonic clock.
+        started, clock = time.time(), time.monotonic()
         run_ = adapter.run_case(runnable, case, invocation, child_env, order["timeouts"]["case_s"], native_path,
                               env_names=env_names)
+        duration = time.monotonic() - clock
         (artifacts_dir / f"{stem}.stdout").write_text(run_["stdout"])
         (artifacts_dir / f"{stem}.stderr").write_text(run_["stderr"])
         artifacts = [_artifact("stdout", "text/plain", artifacts_dir / f"{stem}.stdout"),
@@ -173,7 +177,7 @@ def run(order_path, out_dir) -> dict:
         attempt_key = f"urn:benchx:attempt:{ref[7:23]}:{index}"
 
         for output in adapter.translate(case, order["quantities"], run_, attempted):
-            procedure = dict(output["procedure"], duration_seconds=round(run_["ended"] - run_["started"], 6))
+            procedure = dict(output["procedure"], duration_seconds=round(duration, 6))
             if round_ is not None:
                 procedure["round"] = round_
             if slot is not None:
@@ -189,8 +193,8 @@ def run(order_path, out_dir) -> dict:
             info.update(declared_text)
             provenance = {
                 "run_key": order["run_key"],
-                "started_at": _timestamp(run_["started"]),
-                "ended_at": _timestamp(run_["ended"]),
+                "started_at": _timestamp(started),
+                "ended_at": _timestamp(started + duration),
                 "subject_dirty": source["dirty"],
                 "benchmark_dirty": source["dirty"],
                 "runner": RUNNER,

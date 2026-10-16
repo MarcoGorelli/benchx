@@ -1,6 +1,7 @@
 """The success criteria of prototype-scope.md §3, on fake Google Benchmark output."""
 
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -310,6 +311,15 @@ def run_one(repo, tmp, build_config=None, **order_extra) -> list[dict]:
     path.write_text(json.dumps(order(build, repo["wt-head"], "one", **order_extra)))
     runner.run(path, tmp / "one-out")
     return results(tmp / "one-out")
+
+
+def test_wall_clock_stepping_back_mid_case(repo, tmp, monkeypatch):
+    """A wall clock that steps backwards (NTP, a WSL2 resync) leaves durations non-negative."""
+    wall = iter(range(2_000_000_000, 0, -1))
+    monkeypatch.setattr(time, "time", lambda: float(next(wall)))
+    for doc in run_one(repo, tmp):
+        assert doc["procedure"]["duration_seconds"] >= 0
+        assert doc["provenance"]["ended_at"] >= doc["provenance"]["started_at"]
 
 
 def test_planned_case_never_reported(repo, tmp):
