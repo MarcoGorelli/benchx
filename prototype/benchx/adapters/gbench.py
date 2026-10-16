@@ -10,7 +10,6 @@ import json
 import os
 import re
 import subprocess
-import time
 from pathlib import Path
 
 from .base import Unsupported
@@ -109,7 +108,6 @@ def run_case(binary, case, flags, env, timeout, native_path, env_names=()) -> di
     """Run one case; never raises for harness failures, which become results."""
     args = [str(binary), f"--benchmark_filter=^{re.escape(case)}$",
             f"--benchmark_out={native_path}", "--benchmark_out_format=json", *flags]
-    started = time.time()
     try:
         out = subprocess.run(args, env=env, capture_output=True, text=True, timeout=timeout)
         status, stdout, stderr = out.returncode, out.stdout, out.stderr
@@ -124,7 +122,7 @@ def run_case(binary, case, flags, env, timeout, native_path, env_names=()) -> di
         except ValueError:
             native = None
     return {"exit_status": status, "timed_out": status is None, "stdout": stdout, "stderr": stderr,
-            "native": native, "started": started, "ended": time.time()}
+            "native": native}
 
 
 def translate(case: str, quantities: list[str], run: dict, attempted: int) -> list[dict]:

@@ -20,7 +20,6 @@ import shutil
 import signal
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 from .. import snapshot
@@ -202,7 +201,6 @@ def run_case(runnable, case, flags, env, timeout, native_path, env_names=None) -
         module_dir=str(runnable["module"].parent), root=str(runnable["root"]), case=case))
     # Absolute: the child runs in the tree, not where the output directory was named.
     args = [runnable["python"], str(driver.resolve()), *flags, "-o", str(native_path.resolve())]
-    started = time.time()
     # Its own process group, so a timeout takes the workers down with the manager.
     proc = subprocess.Popen(args, env=env, cwd=runnable["root"], text=True, start_new_session=True,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -230,7 +228,7 @@ def run_case(runnable, case, flags, env, timeout, native_path, env_names=None) -
     if worker_env.exists():
         artifacts.append(("worker-environment", "application/json", worker_env))
     return {"exit_status": status, "timed_out": status is None, "stdout": stdout or "", "stderr": stderr or "",
-            "native": native, "started": started, "ended": time.time(), "artifacts": artifacts,
+            "native": native, "artifacts": artifacts,
             "worker_env": captured, "passed_env_digest": env_digest(env)}
 
 
