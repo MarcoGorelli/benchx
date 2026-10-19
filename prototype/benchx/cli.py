@@ -411,7 +411,13 @@ def main(argv=None):
                    help="kind of document being checked (default: %(default)s)")
     p.set_defaults(fn=cmd_validate)
 
-    args = ap.parse_args(argv)
+    args, extra = ap.parse_known_args(argv)
+    # argparse takes a nargs="*" positional only from the first run of positionals, so cases
+    # given after an option (`bx bench T --suite S CASE`) arrive here, on some Python versions.
+    if args.cmd == "bench" and not any(item.startswith("-") for item in extra):
+        args.functions += extra
+    elif extra:
+        ap.error(f"unrecognized arguments: {' '.join(extra)}")
     return args.fn(args)
 
 
