@@ -48,7 +48,7 @@ def test_default_run_key():
 
 
 def test_compare_orders_are_now_validated():
-    side = {"build": Path("/b"), "source": "/s", "identity": {}, "uri": None, "text": {}, "labels": {}}
+    side = {"kind": "build", "path": Path("/b"), "source": "/s", "identity": {}, "uri": None, "text": {}, "labels": {}}
     kwargs = dict(suite="demo-bench", filter=None, quantity="wall-time", min_time=None, project=None,
                   run_key="rk", source_uri="https://example.org/demo.git", round_=0, slot=0, labels=None)
     assert core.check(session._order(side, repetitions=5, **kwargs), "work-order") == []

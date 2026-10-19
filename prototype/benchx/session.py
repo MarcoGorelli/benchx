@@ -13,10 +13,12 @@ target-provider role.
 """
 
 import json
+import os
 from pathlib import Path
 
+from . import adapters, harnesses, orders, runner, snapshot, target as target_mod
 from . import compare as compare_mod
-from . import harnesses, orders, runner, snapshot, target as target_mod
+from .adapters.base import Unsupported
 from .errors import SessionError
 from .identity import normalize_remote
 
@@ -42,42 +44,59 @@ def parse_label(text: str) -> tuple[str, str, str]:
     return name, base, contender
 
 
-def _side(spec: str, suite: str, operation: str) -> dict:
+KINDS = ("build", "working_tree")
+
+
+def _side(spec: str, suite: str, operation: str, harness=None) -> dict:
     """Locate and identify one side before anything runs.
 
     `spec` is `@CONFIG[=SOURCE_REF]` (ask the provider to `operation`) or
-    `BUILD_DIR[:SOURCE_DIR]` (read the build directory's sidecar, if any).
+    `BUILD_DIR[:SOURCE_DIR]` (read the build directory's sidecar, if any). A
+    bare build directory is always a build; a working tree comes only from a
+    provider, whose description says so. The harness's adapter checks that the
+    suite is there and usable, as the runner will, so a side it would refuse
+    is refused before any round runs.
     """
+    harness = harness or HARNESS
     try:
         description = target_mod.resolve(spec, operation=operation)
     except target_mod.TargetError as e:
         raise SessionError(str(e)) from None
     source = None
     if description:
-        if description["target"]["kind"] != "build":
-            raise SessionError(f"{spec}: only build targets are supported; "
-                               f"{description['target']['kind']!r} is deferred")
+        kind = description["target"]["kind"]
+        if kind not in KINDS:
+            raise SessionError(f"{spec}: only build and working_tree targets are supported; {kind!r} is deferred")
         if "build" in description:
             raise SessionError(f"{spec}: a declared build is deferred in the prototype "
                                "(the runner reads CMakeCache.txt)")
-        build = description["target"]["path"]
-        source = description["target"].get("source_dir")
+        path = description["target"]["path"]
+        # A working tree is its own source, as for the runner.
+        source = description["target"].get("source_dir") or (path if kind == "working_tree" else None)
         uri = description["target"]["source"]["uri"]
     else:
-        build, source = parse_target(spec)
+        kind = "build"
+        path, source = parse_target(spec)
         uri = None
-    build = Path(build).resolve()
-    if not build.is_dir():
-        raise SessionError(f"build directory not found: {build}")
-    if not (build / suite).is_file():
-        raise SessionError(f"suite binary not found: {build / suite}")
+    path = Path(path).resolve()
+    if not path.is_dir():
+        raise SessionError(f"{'build directory' if kind == 'build' else 'working tree'} not found: {path}")
+    try:
+        adapters.get(harness.name).locate(path, suite, dict(os.environ))
+    except Unsupported as e:
+        raise SessionError("; ".join(str(problem) for problem in e.problems)) from None
     if ":" in spec and not spec.startswith("@"):
         source = parse_target(spec)[1] or source
-    source = source or snapshot.cmake_source_dir(build)
-    identity = source and snapshot.git_identity(source)
-    if not identity:
-        raise SessionError(f"cannot locate the checkout {build} was built from; give BUILD_DIR:SOURCE_DIR")
-    return {"build": build, "source": identity["path"], "identity": identity, "uri": uri,
+    if kind == "build":
+        source = source or snapshot.cmake_source_dir(path)
+        identity = source and snapshot.git_identity(source)
+        if not identity:
+            raise SessionError(f"cannot locate the checkout {path} was built from; give BUILD_DIR:SOURCE_DIR")
+    else:
+        identity = snapshot.git_identity(source) or snapshot.directory_identity(source)
+        if not identity:
+            raise SessionError(f"cannot identify the working tree {source}")
+    return {"kind": kind, "path": path, "source": identity["path"], "identity": identity, "uri": uri,
             "text": target_mod.text(description), "labels": dict((description or {}).get("labels", {}))}
 
 
@@ -86,7 +105,7 @@ def _order(side: dict, *, suite, filter, quantity, repetitions, min_time, projec
     """One side's order for one round: a Google Benchmark suite in a build directory."""
     precision, _ = HARNESS.precision(HARNESS.flags_to_precision(repetitions=repetitions, min_time=min_time))
     entry = HARNESS.suite_entry(suite, filter)
-    target = {"kind": "build", "path": str(side["build"]), "source_dir": side["source"],
+    target = {"kind": side["kind"], "path": str(side["path"]), "source_dir": side["source"],
               "source": {"uri": source_uri, "type": "git"}, **side["text"]}
     try:
         return orders.make_order(suite=entry, target=target, precision=precision, quantity=quantity,
