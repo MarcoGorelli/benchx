@@ -111,3 +111,49 @@ def test_a_dirty_working_tree_is_reported_dirty(tree, monkeypatch):
     (tree / "scratch.txt").write_text("x")
     provided(monkeypatch, description(tree))
     assert session._side("@tree", SUITE, "prepare")["identity"]["dirty"] != "clean"
+
+
+# --- a bare path is read by the harness ---------------------------------------------
+
+@pytest.fixture
+def pyperf_tree(tmp_path):
+    """A clean git checkout holding a pyperf module."""
+    root = tmp_path / "wt"
+    (root / "benchmarks").mkdir(parents=True)
+    git(root, "init", "-q")
+    (root / "benchmarks" / "mod.py").write_text("def bench_a():\n    pass\n")
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "tree")
+    return root
+
+
+def test_the_harness_says_what_a_bare_path_names():
+    assert harnesses.GOOGLE_BENCHMARK.BARE_PATH_KIND == "build"
+    assert harnesses.PYPERF.BARE_PATH_KIND == "working_tree"
+
+
+def test_a_bare_path_is_a_working_tree_for_pyperf(pyperf_tree):
+    side = session._side(str(pyperf_tree), "benchmarks/mod.py", "describe", harness=harnesses.PYPERF)
+    assert (side["kind"], side["path"], side["source"]) == ("working_tree", pyperf_tree.resolve(),
+                                                           str(pyperf_tree.resolve()))
+    assert side["identity"]["dirty"] == "clean"
+
+
+def test_a_bare_pyperf_path_is_whole_even_with_a_colon(tmp_path):
+    odd = tmp_path / "a:b"
+    odd.mkdir()
+    with pytest.raises(session.SessionError, match=r"working tree not found: .*a:b"):
+        session._side(str(odd / "x"), "mod.py", "describe", harness=harnesses.PYPERF)
+
+
+def test_a_bare_pyperf_path_without_git_is_identified_by_content(tmp_path):
+    root = tmp_path / "plain"
+    (root / "benchmarks").mkdir(parents=True)
+    (root / "benchmarks" / "mod.py").write_text("def bench_a():\n    pass\n")
+    side = session._side(str(root), "benchmarks/mod.py", "describe", harness=harnesses.PYPERF)
+    assert side["identity"]["revision"].startswith("directory-")
+
+
+def test_a_bare_pyperf_path_missing_the_module_is_refused(pyperf_tree):
+    with pytest.raises(session.SessionError, match="suite module not found"):
+        session._side(str(pyperf_tree), "benchmarks/gone.py", "describe", harness=harnesses.PYPERF)

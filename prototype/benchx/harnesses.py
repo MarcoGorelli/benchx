@@ -13,6 +13,8 @@ Each harness has
     precision(flags, start) -> (the complete precision, the config file it
                             read or None): flags over its defaults
     suite_entry(suite, filter) -> one `suites[]` entry
+    BARE_PATH_KIND          what a bare path names for this harness: a `build`
+                            directory or a `working_tree`
 """
 
 import re
@@ -29,6 +31,7 @@ def exact_filter(names) -> str | None:
 class Harness:
     name: str
     FLAGS: tuple[str, ...] = ()
+    BARE_PATH_KIND: str
 
     def suite_entry(self, suite: str, filter: str | None = None) -> dict:
         entry = {"adapter": self.name, "suite": suite}
@@ -57,6 +60,7 @@ class GoogleBenchmark(Harness):
 
     name = "google-benchmark"
     FLAGS = ("repetitions", "min_time")
+    BARE_PATH_KIND = "build"  # the binary is built; BUILD_DIR[:SOURCE_DIR]
     DEFAULT_REPETITIONS = 5
 
     def _precision_from(self, repetitions=None, min_time=None) -> dict:
@@ -78,6 +82,7 @@ class Pyperf(Harness):
 
     name = "pyperf"
     FLAGS = ("processes", "values", "min_time", "loops", "warmups")
+    BARE_PATH_KIND = "working_tree"  # the module is run as found; the path is its own source
 
     def _precision_from(self, processes=None, values=None, min_time=None, loops=None, warmups=None) -> dict:
         if min_time is not None and loops is not None:

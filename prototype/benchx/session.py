@@ -49,12 +49,13 @@ KINDS = ("build", "working_tree")
 def _side(spec: str, suite: str, operation: str, harness=None, environment_variables=None) -> dict:
     """Locate and identify one side before anything runs.
 
-    `spec` is `@CONFIG[=SOURCE_REF]` (ask the provider to `operation`) or
-    `BUILD_DIR[:SOURCE_DIR]` (read the build directory's sidecar, if any). A
-    bare build directory is always a build; a working tree comes only from a
-    provider, whose description says so. The harness's adapter checks that the
-    suite is there and usable, as the runner will, so a side it would refuse
-    is refused before any round runs.
+    `spec` is `@CONFIG[=SOURCE_REF]` (ask the provider to `operation`) or a
+    bare path, which the harness reads: Google Benchmark's is
+    `BUILD_DIR[:SOURCE_DIR]` (read the build directory's sidecar, if any), and
+    pyperf's is a working tree, its own source. A provider's description says
+    which kind it is. The harness's adapter checks that the suite is there and
+    usable, as the runner will, so a side it would refuse is refused before
+    any round runs.
     """
     harness = harness or HARNESS
     try:
@@ -74,8 +75,8 @@ def _side(spec: str, suite: str, operation: str, harness=None, environment_varia
         source = description["target"].get("source_dir") or (path if kind == "working_tree" else None)
         uri = description["target"]["source"]["uri"]
     else:
-        kind = "build"
-        path, source = parse_target(spec)
+        kind = harness.BARE_PATH_KIND
+        path, source = parse_target(spec) if kind == "build" else (spec, spec)  # a working tree is its own source
         uri = None
     path = Path(path).resolve()
     if not path.is_dir():
@@ -85,7 +86,7 @@ def _side(spec: str, suite: str, operation: str, harness=None, environment_varia
         adapters.get(harness.name).locate(path, suite, {**os.environ, **(environment_variables or {})})
     except Unsupported as e:
         raise SessionError("; ".join(str(problem) for problem in e.problems)) from None
-    if ":" in spec and not spec.startswith("@"):
+    if kind == "build" and ":" in spec and not spec.startswith("@"):
         source = parse_target(spec)[1] or source
     if kind == "build":
         source = source or snapshot.cmake_source_dir(path)

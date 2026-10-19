@@ -71,6 +71,28 @@ def test_bench_command_runs_and_ingests(tree, capsys):
     assert levels(order["precision"]) == {"process": 2, "value": 2}
 
 
+def test_shorthand_order_is_stable(tree):
+    """The order `bx bench MODULE.py FUNCTION` writes; unchanged by how bench is wired inside."""
+    assert cli.main(["bench", "mod.py", "bench_a", "--run-key", "snap", "--no-ingest", "-e", "A=1", *FAST]) == cli.EXIT_OK
+    order = json.loads((tree / "results" / "snap" / "orders" / "order.json").read_text())
+    here = str(tree.resolve())
+    assert order.pop("work_order_id").startswith("urn:uuid:")
+    assert order == {
+        "schema_version": "benchx/work-order/0.1.0", "state": "resolved",
+        "suites": [{"adapter": "pyperf", "suite": "mod.py", "filter": "^(bench_a)$"}],
+        "target": {"kind": "working_tree", "path": here, "source_dir": here,
+                   "source": {"uri": f"file://{here}", "type": "git"}},
+        "quantities": ["wall-time"],
+        "precision": {"repetitions": {"mode": "fixed", "levels": [{"unit": "process", "n": 2}, {"unit": "value", "n": 2}]},
+                      "calibration": {"mode": "fixed", "n_iterations": 20},
+                      "warmup": {"mode": "count", "n_warmup": 1}},
+        "timeouts": {"case_s": 60, "order_s": 600}, "run_key": "snap",
+        "requester": {"kind": "workbench", "name": "bx"},
+        "plan": [{"id": "p0", "case": "*", "quantity": "wall-time"}],
+        "environment_variables": {"A": "1"},
+    }
+
+
 def test_unversioned_benchmark_is_identified_by_its_tree(tree):
     assert cli.main(["bench", "mod.py", "bench_a", "--run-key", "nogit", "--no-ingest", *FAST]) == cli.EXIT_OK
     documents = [json.loads(p.read_text()) for p in (tree / "results" / "nogit").glob("*.json")
