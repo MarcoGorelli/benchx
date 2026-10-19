@@ -14,7 +14,7 @@ from typing import get_args
 from . import bench as bench_mod
 from . import compare as compare_mod
 from . import config as config_mod
-from . import core, harnesses, runner, session
+from . import core, harnesses, orders, runner, session
 from . import target as target_mod
 from .core.validation import Kind
 from .store import Store
@@ -59,37 +59,57 @@ def _environment(items) -> dict:
     return env
 
 
+def _bench_target(args) -> tuple[str, str, str | None]:
+    """The target, suite and adapter `bx bench` runs. With `--suite` they are as given.
+    Without it, the target is a Python module (the shorthand `bx bench MODULE.py
+    [FUNCTION ...]`): its checkout is the target, its path in it the suite, and the
+    harness pyperf."""
+    if args.suite:
+        if args.tree:
+            raise UsageError("--tree belongs to `bx bench MODULE.py`; give the tree as the TARGET with --suite")
+        return args.target, args.suite, args.adapter
+    if not args.target.endswith(".py"):
+        raise UsageError("give --suite, or a Python file to benchmark")
+    if args.adapter not in (None, "pyperf"):
+        raise UsageError(f"a Python file is benchmarked with pyperf, not {args.adapter}")
+    target, suite = bench_mod.module_target(args.target, args.tree)
+    return target, suite, "pyperf"
+
+
 def cmd_bench(args):
-    """Benchmark functions of a Python module with pyperf: build the order from
-    the config file, flags and environment variables, run it, deliver, print a table."""
+    """Run one target once, as one order of a comparison session: resolve the target,
+    build the order from the harness defaults, config file, flags and environment
+    variables, run it, deliver, print a table."""
     try:
         env = _environment(args.env)
+        if args.functions and args.filter:
+            raise UsageError("give case names or --filter, not both")
+        target, suite, adapter = _bench_target(args)
     except UsageError as e:
         print(f"bx bench: error: {e}", file=sys.stderr)
         return EXIT_REFUSED
+    except bench_mod.SessionError as e:
+        print(f"bx bench: error: {e}", file=sys.stderr)
+        return EXIT_REFUSED
+    store = None if args.no_ingest else Store()
     try:
-        flags = bench_mod.flags_to_precision(args.processes, args.values, args.min_time, args.loops, args.warmups)
-        order, config_path = bench_mod.build_order(
-            args.module, args.functions, tree=args.tree, precision_flags=flags, environment_variables=env,
-            project=args.project, run_key=args.run_key, source_uri=args.source_uri,
-            case_s=args.case_timeout)
-        out = Path(args.out) if args.out else Path("results") / order["run_key"]
-        reps = {lv["unit"]: lv["n"] for lv in order["precision"]["repetitions"]["levels"]}
-        print(f"precision: {reps['process']} processes x {reps['value']} values "
-              f"(config: {config_path or 'none, pyperf defaults'})", file=sys.stderr)
-        summary = bench_mod.run_order(order, out)
-    except (bench_mod.SessionError, config_mod.ConfigError) as e:
+        summary = session.bench_target(
+            target, suite=suite, store=store, adapter=adapter, flags={name: getattr(args, name) for name in harnesses.FLAG_NAMES},
+            environment_variables=env, filter=harnesses.exact_filter(args.functions) or args.filter,
+            quantity=args.quantity or "wall-time", project=args.project, run_key=args.run_key, out=args.out,
+            source_uri=args.source_uri, case_s=args.case_timeout, build=not args.no_build,
+            progress=lambda message: print(message, file=sys.stderr))
+    except (session.SessionError, config_mod.ConfigError) as e:
         print(f"bx bench: error: {e}", file=sys.stderr)
         return EXIT_REFUSED
     except runner.Refused as e:
         return _refused(e)
     print(bench_mod.render(bench_mod.summarize(summary["files"])))
     print(f"\n{summary['results']} result(s) -> {summary['out']}  (order {summary['order'][:19]})")
-    if args.no_ingest:
+    if store is None:
         return EXIT_OK
-    store = Store()
     print(f"{store.path}: ", end="")
-    return _report(store.ingest_paths(summary["files"]))
+    return _report(summary["outcome"])
 
 
 def cmd_config(args):
@@ -272,6 +292,34 @@ def cmd_validate(args):
     return EXIT_OK if valid == len(args.files) else EXIT_INVALID
 
 
+def _add_target_options(parser, command):
+    """The options `bx bench` and `bx compare` (measure mode) share: the harness,
+    its suite and cases, its precision flags, and where the results go."""
+    parser.add_argument("--adapter", choices=sorted(harnesses.HARNESSES),
+                        help=f"the harness (default {session.HARNESS.name})")
+    parser.add_argument("--suite", help="pyperf: the module's path in the working tree; "
+                                        "google-benchmark: the binary in the build directory")
+    parser.add_argument("--filter", help="a case filter regex (pyperf: function names; "
+                                         "google-benchmark: --benchmark_filter)")
+    parser.add_argument("--quantity", help="wall-time (default); google-benchmark also cpu-time")
+    parser.add_argument("-e", "--env", action="append", metavar="NAME=VALUE",
+                        help="set an environment variable for the benchmark (repeatable); "
+                             "each becomes a workload parameter")
+    parser.add_argument("--repetitions", type=int,
+                        help=f"google-benchmark: repetitions per case (default {harnesses.GOOGLE_BENCHMARK.DEFAULT_REPETITIONS})")
+    parser.add_argument("--processes", type=int, help="pyperf: worker processes (default 20)")
+    parser.add_argument("--values", type=int, help="pyperf: values per process (default 3)")
+    parser.add_argument("--min-time", type=float, help="adaptive calibration: minimum seconds per sample")
+    parser.add_argument("--loops", type=int, help="pyperf: fixed calibration, inner loops per value")
+    parser.add_argument("--warmups", type=int, help="pyperf: warmup values per process (0: none)")
+    parser.add_argument("--project", help="name a project, so the results join its series; omit for an ad hoc run")
+    parser.add_argument("--run-key", help=f"default: {command}-<UTC timestamp>")
+    parser.add_argument("--out", help="directory for orders and result files (default ./results/RUN_KEY)")
+    parser.add_argument("--no-build", action="store_true",
+                        help="ask a provider to describe each @CONFIG target instead of preparing (building) it")
+    parser.add_argument("--source-uri", help="the source's URI (default: the checkout's origin remote)")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="bx", description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -283,27 +331,22 @@ def main(argv=None):
                    help="only write the result files; do not deliver them to the local store")
     p.set_defaults(fn=cmd_run)
 
-    p = sub.add_parser("bench", help="benchmark functions of a Python module with pyperf",
-                       description="bx bench MODULE [FUNCTION ...]: each FUNCTION is a case. With none, the "
-                                   "module's bench_* and benchmark_* functions. Precision comes from "
-                                   ".benchx/config.json (bx config init writes one) and the flags below; "
-                                   "flags win, and pyperf's defaults fill the rest.")
-    p.add_argument("module", help="a Python file; its tree is its git checkout, or --tree")
-    p.add_argument("functions", nargs="*", metavar="FUNCTION")
-    p.add_argument("--tree", help="the tree being measured (default: the module's git checkout or directory)")
-    p.add_argument("--processes", type=int, help="worker processes (pyperf default 20)")
-    p.add_argument("--values", type=int, help="values per process (pyperf default 3)")
-    p.add_argument("--min-time", type=float, help="adaptive calibration: minimum seconds per value")
-    p.add_argument("--loops", type=int, help="fixed calibration: inner loops per value")
-    p.add_argument("--warmups", type=int, help="warmup values per process (0: none)")
-    p.add_argument("-e", "--env", action="append", metavar="NAME=VALUE",
-                   help="set an environment variable for the benchmark (repeatable)")
-    p.add_argument("--project", help="name a project, so results join its series; omit for an ad hoc run")
-    p.add_argument("--run-key", help="default: bench-<UTC timestamp>")
-    p.add_argument("--source-uri", help="the source's URI (default: the checkout's origin remote)")
-    p.add_argument("--out", help="directory for the order and result files (default ./results/RUN_KEY)")
-    p.add_argument("--case-timeout", type=float, default=bench_mod.CASE_TIMEOUT_S,
-                   help="seconds allowed per function (default %(default)s)")
+    p = sub.add_parser("bench", help="benchmark one target: the single-target form of bx compare",
+                       description="bx bench TARGET --suite S [FUNCTION ...]: run one target once and print a table "
+                                   "per case. TARGET and the options are those of bx compare: @CONFIG[=SOURCE_REF] "
+                                   "(the project's target provider) or a path, which the harness reads (pyperf: a "
+                                   "working tree; google-benchmark: BUILD_DIR[:SOURCE_DIR]). Each FUNCTION is an "
+                                   "exact case name; with none, the harness's default cases. The shorthand "
+                                   "bx bench MODULE.py [FUNCTION ...] benchmarks a Python module with pyperf: "
+                                   "its checkout is the target, and its path there the suite. Precision comes "
+                                   "from the harness's defaults, the config file (pyperf; bx config init "
+                                   "writes one) and the flags: flags win.")
+    p.add_argument("target", metavar="TARGET", help="@CONFIG[=SOURCE_REF], a path, or (with no --suite) a Python file")
+    p.add_argument("functions", nargs="*", metavar="FUNCTION", help="exact case names (default: all cases)")
+    _add_target_options(p, "bench")
+    p.add_argument("--tree", help="the shorthand's tree (default: the module's git checkout or directory)")
+    p.add_argument("--case-timeout", type=float, default=orders.CASE_TIMEOUT_S,
+                   help="seconds before one case is stopped (default %(default)s)")
     p.add_argument("--no-ingest", action="store_true", help="only write result files; skip the local store")
     p.set_defaults(fn=cmd_bench)
 
@@ -357,30 +400,8 @@ def main(argv=None):
     read.add_argument("--results", nargs="+",
                       help="compare these result directories through a throwaway store, not the local one")
     measure = p.add_argument_group("measure mode")
-    measure.add_argument("--adapter", choices=sorted(harnesses.HARNESSES),
-                         help=f"the harness both sides run (default {session.HARNESS.name})")
-    measure.add_argument("--suite", help="google-benchmark: the binary in each target; "
-                                         "pyperf: the module's path in each target")
-    measure.add_argument("--filter", help="a case filter regex (google-benchmark: --benchmark_filter; "
-                                          "pyperf: function names)")
-    measure.add_argument("--quantity", help="wall-time (default); google-benchmark also cpu-time")
     measure.add_argument("--rounds", type=int, help="alternation rounds; each runs both sides once")
-    measure.add_argument("-e", "--env", action="append", metavar="NAME=VALUE",
-                         help="set an environment variable for both sides (repeatable); "
-                              "each becomes a workload parameter")
-    measure.add_argument("--repetitions", type=int,
-                         help=f"google-benchmark: repetitions per case (default {harnesses.GOOGLE_BENCHMARK.DEFAULT_REPETITIONS})")
-    measure.add_argument("--processes", type=int, help="pyperf: worker processes")
-    measure.add_argument("--values", type=int, help="pyperf: values per process")
-    measure.add_argument("--min-time", type=float, help="adaptive calibration: minimum seconds per sample")
-    measure.add_argument("--loops", type=int, help="pyperf: fixed calibration, inner loops per value")
-    measure.add_argument("--warmups", type=int, help="pyperf: warmup values per process (0: none)")
-    measure.add_argument("--project", help="name a project, so the results join its series; omit for an ad hoc run")
-    measure.add_argument("--run-key", help="default: compare-<UTC timestamp>")
-    measure.add_argument("--out", help="directory for orders and result files (default ./results/RUN_KEY)")
-    measure.add_argument("--no-build", action="store_true",
-                         help="ask a provider to describe each @CONFIG target instead of preparing (building) it")
-    measure.add_argument("--source-uri", help="the source's URI when the sides' checkouts do not share one")
+    _add_target_options(measure, "compare")
     p.set_defaults(fn=cmd_compare)
 
     p = sub.add_parser("validate", help="check documents against their schema and rules",

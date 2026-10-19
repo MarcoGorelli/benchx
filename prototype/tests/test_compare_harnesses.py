@@ -19,8 +19,9 @@ MEASURE = ["A", "B", "--profile", "revisions", "--suite", "s", "--rounds", "1"]
 
 
 @pytest.mark.parametrize("argv, message", [
-    (MEASURE + ["--processes", "2"], "google-benchmark takes no --processes"),
+    (MEASURE + ["--adapter", "google-benchmark", "--processes", "2"], "google-benchmark takes no --processes"),
     (MEASURE + ["--adapter", "pyperf", "--repetitions", "3"], "pyperf takes no --repetitions"),
+    (MEASURE + ["--repetitions", "3"], "pyperf takes no --repetitions"),  # pyperf is the default
     (MEASURE + ["-e", "NOEQUALS"], "-e wants NAME=VALUE"),
     (["--run", "k", "--profile", "revisions", "--baseline", "x", "--adapter", "pyperf"], "belongs to measure mode"),
     (["--run", "k", "--profile", "revisions", "--baseline", "x", "-e", "A=1"], "belongs to measure mode"),

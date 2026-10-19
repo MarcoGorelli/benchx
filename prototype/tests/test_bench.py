@@ -9,8 +9,10 @@ from benchx.identity import normalize_remote
 
 pytest.importorskip("pyperf")
 
-from benchx import bench, cli, core
+from benchx import cli, core, harnesses, session
+from benchx.errors import SessionError
 from benchx.store import Store
+from conftest import SOURCE_URI
 
 MODULE = textwrap.dedent('''
     def bench_a():
@@ -47,17 +49,22 @@ def tree(tmp, monkeypatch):
 
 def test_order_holds_the_resolved_precision(tree):
     write_config(tree, {"repetitions": {"mode": "fixed", "levels": [{"unit": "process", "n": 7}]}})
-    order, _ = bench.build_order(tree / "mod.py", ["bench_a"], precision_flags=bench.flags_to_precision(values=5),
-                                 run_key="r", cwd=tree)
+    harness, precision, config_path = session._harness("pyperf", {"values": 5}, cwd=tree)
+    side = session._side(str(tree), "mod.py", "describe", harness)
+    order = session._order(side, harness=harness, suite="mod.py", filter=harnesses.exact_filter(["bench_a"]),
+                           quantity="wall-time", precision=precision, environment_variables=None, project=None,
+                           run_key="r", source_uri=SOURCE_URI)
+    assert config_path == tree / ".benchx" / "config.json"
     assert core.check(order, "work-order") == []
     assert levels(order["precision"]) == {"process": 7, "value": 5}
     assert order["suites"][0] == {"adapter": "pyperf", "suite": "mod.py", "filter": "^(bench_a)$"}
     assert order["target"]["kind"] == "working_tree"
+    assert "round" not in order and "slot" not in order
 
 
 def test_both_calibration_flags_conflict():
-    with pytest.raises(bench.SessionError):
-        bench.flags_to_precision(min_time=0.1, loops=5)
+    with pytest.raises(SessionError):
+        harnesses.PYPERF.flags_to_precision(min_time=0.1, loops=5)
 
 
 def test_bench_command_runs_and_ingests(tree, capsys):
@@ -147,5 +154,7 @@ def test_relative_local_remotes_resolve_against_base(tmp_path):
 
 
 def test_source_uri_flag_overrides_the_remote(tree):
-    order, _ = bench.build_order(tree / "mod.py", ["bench_a"], source_uri="https://example.org/r.git")
+    assert cli.main(["bench", "mod.py", "bench_a", "--run-key", "uri", "--no-ingest", "--source-uri",
+                     "https://example.org/r.git", *FAST]) == cli.EXIT_OK
+    order = json.loads((tree / "results" / "uri" / "orders" / "order.json").read_text())
     assert order["target"]["source"]["uri"] == "https://example.org/r.git"

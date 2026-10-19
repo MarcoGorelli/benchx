@@ -1,21 +1,19 @@
-"""`bx bench mod.py f g`: benchmark Python functions with pyperf (PYPERF_PLAN.md step 5).
+"""`bx bench`: one target, one order, one table (prototype-design.md §1).
 
-The workbench's part for a one-off: build one work order from the module, the
-config file, the flags and the environment variables, run it, deliver the
-results to the local store, and summarize them as a table. Nothing is built or
-checked out; the tree is measured as found.
+`bx bench` is the single-target form of `bx compare`: `session.bench_target`
+resolves the target and builds the order the way a comparison session does
+(no round, no slot, no comparison). What is left here is the shorthand
+`bx bench MODULE.py [FUNCTION ...]`, which names a Python module's checkout as
+the target and the module's path in it as the suite, and the table that
+summarizes the results.
 """
 
 import json
 import statistics
 from pathlib import Path
 
-from . import harnesses, orders, runner, snapshot
+from . import snapshot
 from .errors import SessionError
-from .identity import normalize_remote
-from .orders import CASE_TIMEOUT_S, ORDER_TIMEOUT_S
-
-HARNESS = harnesses.PYPERF
 
 
 def tree_of(module: Path, tree=None) -> Path:
@@ -26,34 +24,16 @@ def tree_of(module: Path, tree=None) -> Path:
     return Path(top).resolve() if top else module.parent.resolve()
 
 
-def flags_to_precision(processes=None, values=None, min_time=None, loops=None, warmups=None) -> dict:
-    """The flags that set precision, spelled as a work-order `precision`."""
-    return HARNESS.flags_to_precision(processes=processes, values=values, min_time=min_time,
-                                      loops=loops, warmups=warmups)
-
-
-def build_order(module, functions, *, tree=None, precision_flags=None, environment_variables=None,
-                project=None, run_key=None, labels=None, source_uri=None, case_s=CASE_TIMEOUT_S, order_s=ORDER_TIMEOUT_S, cwd="."):
-    """The resolved work order, and the config file it read (or None)."""
+def module_target(module, tree=None) -> tuple[str, str]:
+    """The shorthand's target and suite: the module's tree, and the module's path in it."""
     module = Path(module).resolve()
     if not module.is_file():
         raise SessionError(f"no such module: {module}")
     root = tree_of(module, tree)
     try:
-        suite = module.relative_to(root).as_posix()
+        return str(root), module.relative_to(root).as_posix()
     except ValueError:
         raise SessionError(f"{module} is not inside the tree {root}; give --tree") from None
-    precision, config_path = HARNESS.precision(precision_flags, start=cwd)
-    entry = HARNESS.suite_entry(suite, harnesses.exact_filter(functions))
-    target = {"kind": "working_tree", "path": str(root), "source_dir": str(root),
-              "source": {"uri": normalize_remote(source_uri) if source_uri else snapshot.source_uri(str(root)), "type": "git"}}
-    try:
-        order = orders.make_order(suite=entry, target=target, precision=precision,
-                                  run_key=run_key or orders.default_run_key("bench"), case_s=case_s, order_s=order_s,
-                                  project=project, labels=labels, environment_variables=environment_variables)
-    except orders.OrderError as e:
-        raise SessionError(str(e)) from None
-    return order, config_path
 
 
 def summarize(files) -> list[dict]:
@@ -100,13 +80,3 @@ def render(rows) -> str:
     widths = [max(len(row[i]) for row in [header, *body]) for i in range(len(header))]
     lines = ["  ".join(cell.ljust(w) for cell, w in zip(row, widths)).rstrip() for row in [header, *body]]
     return "\n".join([lines[0], "  ".join("-" * w for w in widths), *lines[1:]])
-
-
-def run_order(order, out_dir) -> dict:
-    """Write the order under out_dir/orders and run it; the runner's summary."""
-    import json
-    orders = Path(out_dir) / "orders"
-    orders.mkdir(parents=True, exist_ok=True)
-    path = orders / "order.json"
-    path.write_text(json.dumps(order, indent=1) + "\n")
-    return runner.run(path, out_dir)

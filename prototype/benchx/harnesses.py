@@ -12,6 +12,7 @@ Each harness has
                             `precision`; a flag it does not take is refused
     precision(flags, start) -> (the complete precision, the config file it
                             read or None): flags over its defaults
+    describe_precision(precision, config_path) -> that precision in a few words
     suite_entry(suite, filter) -> one `suites[]` entry
     BARE_PATH_KIND          what a bare path names for this harness: a `build`
                             directory or a `working_tree`
@@ -52,6 +53,9 @@ class Harness:
     def precision(self, flags: dict | None, start=".") -> tuple[dict, object]:
         raise NotImplementedError
 
+    def describe_precision(self, precision: dict, config_path=None) -> str:
+        raise NotImplementedError
+
 
 class GoogleBenchmark(Harness):
     """Repetitions of one level; adaptive calibration by minimum time. No config
@@ -73,6 +77,9 @@ class GoogleBenchmark(Harness):
 
     def precision(self, flags, start="."):
         return {"repetitions": self.DEFAULT_REPETITIONS, **(flags or {})}, None
+
+    def describe_precision(self, precision, config_path=None):
+        return f"{precision['repetitions']} repetitions"
 
 
 class Pyperf(Harness):
@@ -101,6 +108,10 @@ class Pyperf(Harness):
 
     def precision(self, flags, start="."):
         return config.resolve(self.name, flags, start=start)
+
+    def describe_precision(self, precision, config_path=None):
+        reps = {level["unit"]: level["n"] for level in precision["repetitions"]["levels"]}
+        return f"{reps['process']} processes x {reps['value']} values (config: {config_path or 'none, pyperf defaults'})"
 
 
 GOOGLE_BENCHMARK = GoogleBenchmark()

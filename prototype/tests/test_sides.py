@@ -38,7 +38,7 @@ def tree(tmp_path):
 
 def test_a_bare_build_directory_is_a_build(repo, tmp_path):
     build = make_build(tmp_path / "b", repo["wt-base"], cases())
-    side = session._side(str(build), SUITE, "describe")
+    side = session._side(str(build), SUITE, "describe", harness=harnesses.GOOGLE_BENCHMARK)
     assert side["kind"] == "build"
     assert side["path"] == build.resolve()
     assert side["source"] == str(repo["wt-base"].resolve())  # from CMakeCache.txt
@@ -48,27 +48,27 @@ def test_a_bare_build_directory_is_a_build(repo, tmp_path):
 def test_a_missing_suite_is_refused_by_the_adapter(repo, tmp_path):
     build = make_build(tmp_path / "b", repo["wt-base"], cases())
     with pytest.raises(session.SessionError, match="suite binary not found"):
-        session._side(str(build), "no-such-bench", "describe")
+        session._side(str(build), "no-such-bench", "describe", harness=harnesses.GOOGLE_BENCHMARK)
 
 
 def test_a_suite_the_runner_could_not_execute_is_refused_up_front(repo, tmp_path):
     build = make_build(tmp_path / "b", repo["wt-base"], cases())
     (build / "not-executable").write_text("")
     with pytest.raises(session.SessionError, match="suite binary not found"):
-        session._side(str(build), "not-executable", "describe")
+        session._side(str(build), "not-executable", "describe", harness=harnesses.GOOGLE_BENCHMARK)
 
 
 def test_a_provided_working_tree_is_its_own_source(tree, monkeypatch):
     provided(monkeypatch, description(tree))
-    side = session._side("@tree", SUITE, "prepare")
+    side = session._side("@tree", SUITE, "prepare", harness=harnesses.GOOGLE_BENCHMARK)
     assert (side["kind"], side["path"], side["source"]) == ("working_tree", tree.resolve(), str(tree.resolve()))
     assert side["identity"]["dirty"] == "clean"
 
 
 def test_a_working_tree_order_is_valid(tree, monkeypatch):
     provided(monkeypatch, description(tree))
-    side = session._side("@tree", SUITE, "prepare")
-    order = session._order(side, harness=session.HARNESS, suite=SUITE, filter=None, quantity="wall-time",
+    side = session._side("@tree", SUITE, "prepare", harness=harnesses.GOOGLE_BENCHMARK)
+    order = session._order(side, harness=harnesses.GOOGLE_BENCHMARK, suite=SUITE, filter=None, quantity="wall-time",
                            precision={"repetitions": 3}, environment_variables=None, project=None, run_key="rk",
                            source_uri=SOURCE_URI, round_=0, slot=0, labels=None)
     assert order["target"]["kind"] == "working_tree"
@@ -81,7 +81,7 @@ def test_a_working_tree_outside_git_is_identified_by_content(tmp_path, monkeypat
     root.mkdir()
     executable(root / SUITE)
     provided(monkeypatch, description(root))
-    side = session._side("@plain", SUITE, "prepare")
+    side = session._side("@plain", SUITE, "prepare", harness=harnesses.GOOGLE_BENCHMARK)
     assert side["identity"]["revision"].startswith("directory-")
     assert side["identity"]["dirty"] == "dirty"  # so a revisions comparison refuses it
 
@@ -89,7 +89,7 @@ def test_a_working_tree_outside_git_is_identified_by_content(tmp_path, monkeypat
 def test_a_missing_working_tree_says_so(tmp_path, monkeypatch):
     provided(monkeypatch, description(tmp_path / "gone"))
     with pytest.raises(session.SessionError, match="working tree not found"):
-        session._side("@gone", SUITE, "prepare")
+        session._side("@gone", SUITE, "prepare", harness=harnesses.GOOGLE_BENCHMARK)
 
 
 def test_an_artifact_target_is_still_deferred(monkeypatch):
@@ -98,7 +98,7 @@ def test_an_artifact_target_is_still_deferred(monkeypatch):
                       "source": {"uri": SOURCE_URI, "type": "git"}, "revision": "abc"}
     provided(monkeypatch, desc)
     with pytest.raises(session.SessionError, match="'artifact' is deferred"):
-        session._side("@a", SUITE, "prepare")
+        session._side("@a", SUITE, "prepare", harness=harnesses.GOOGLE_BENCHMARK)
 
 
 def test_the_harness_decides_what_a_suite_is(tree, monkeypatch):
@@ -110,7 +110,7 @@ def test_the_harness_decides_what_a_suite_is(tree, monkeypatch):
 def test_a_dirty_working_tree_is_reported_dirty(tree, monkeypatch):
     (tree / "scratch.txt").write_text("x")
     provided(monkeypatch, description(tree))
-    assert session._side("@tree", SUITE, "prepare")["identity"]["dirty"] != "clean"
+    assert session._side("@tree", SUITE, "prepare", harness=harnesses.GOOGLE_BENCHMARK)["identity"]["dirty"] != "clean"
 
 
 # --- a bare path is read by the harness ---------------------------------------------

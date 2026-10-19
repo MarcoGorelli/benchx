@@ -107,7 +107,7 @@ def test_provider_failure_and_missing_provider_are_errors(provider, tmp, monkeyp
 
 def test_declared_text_reaches_orders_results_and_the_comparison(repo, tmp, provider):
     store = Store(tmp / "store.parquet")
-    doc = session.compare_targets("@plain", "@hardened", profile="environments", suite="demo-bench", rounds=4,
+    doc = session.compare_targets("@plain", "@hardened", profile="environments", adapter="google-benchmark", suite="demo-bench", rounds=4,
                                   label=("build", "plain", "hardened"), project="demo", store=store,
                                   run_key="t1", out=tmp / "out")
     orders = [json.loads(p.read_text()) for p in sorted((tmp / "out" / "orders").glob("*.json"))]
@@ -131,7 +131,7 @@ def test_declared_text_reaches_orders_results_and_the_comparison(repo, tmp, prov
 
 
 def test_no_build_asks_the_provider_to_describe(repo, tmp, provider):
-    session.compare_targets("@plain", "@hardened", profile="environments", suite="demo-bench", rounds=3,
+    session.compare_targets("@plain", "@hardened", profile="environments", adapter="google-benchmark", suite="demo-bench", rounds=3,
                             label=("build", "plain", "hardened"), store=Store(tmp / "store.parquet"),
                             run_key="t2", out=tmp / "out", build=False)
     result = next(p for p in (tmp / "out").glob("*.json") if not p.name.startswith("workorder-"))
@@ -142,7 +142,7 @@ def test_sidecar_route_needs_no_provider(repo, tmp):
     plain = make_build(tmp / "plain", repo["wt-head"], cases())
     hardened = make_build(tmp / "hardened", repo["wt-head"], cases(quiet=1.02e-3), hardened=True)
     write_sidecar(hardened, repo["wt-head"], how_built="by hand")
-    doc = session.compare_targets(str(plain), str(hardened), profile="environments", suite="demo-bench",
+    doc = session.compare_targets(str(plain), str(hardened), profile="environments", adapter="google-benchmark", suite="demo-bench",
                                   rounds=3, label=("build", "plain", "hardened"),
                                   store=Store(tmp / "store.parquet"), run_key="t3", out=tmp / "out",
                                   source_uri=SOURCE_URI)  # one side has no description to name it
@@ -154,7 +154,7 @@ def test_a_declared_build_is_refused_before_anything_runs(repo, tmp):
     write_sidecar(build, repo["wt-head"], build={"type": "Release"})
     other = make_build(tmp / "o", repo["wt-head"], cases())
     with pytest.raises(session.SessionError, match="declared build is deferred"):
-        session.compare_targets(str(build), str(other), profile="environments", suite="demo-bench", rounds=3,
+        session.compare_targets(str(build), str(other), profile="environments", adapter="google-benchmark", suite="demo-bench", rounds=3,
                                 label=("build", "a", "b"), store=Store(tmp / "s.parquet"), run_key="t4",
                                 out=tmp / "out")
     assert not (tmp / "out").exists()
