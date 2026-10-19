@@ -44,7 +44,8 @@ def summarize(files) -> list[dict]:
         if document.get("schema_version") == "benchx/work-order/0.1.0":
             continue
         measurement = document["measurement"]
-        values = [o["value"] for o in measurement.get("observations", [])]
+        # An observation is a number, or an object carrying one with its metadata (pyperf's).
+        values = [o["value"] if isinstance(o, dict) else o for o in measurement.get("observations", [])]
         rows.append({
             "case": document["coordinates"]["workload"]["name"],
             "status": measurement["status"] + (f" ({measurement['reason']})" if measurement.get("reason") else ""),

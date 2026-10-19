@@ -103,3 +103,16 @@ def test_pyperf_revisions_end_to_end(tmp, worktrees, monkeypatch):
     order = json.loads(Path(tmp / "out" / "orders" / "order-0000.json").read_text())
     assert order["suites"][0]["adapter"] == "pyperf"
     assert order["target"]["kind"] == "working_tree"
+
+
+def test_pyperf_bare_paths_are_working_trees(tmp, worktrees):
+    """Without a provider, a bare path is a working tree for pyperf (as it is a build for Google Benchmark)."""
+    pytest.importorskip("pyperf")
+    doc = session.compare_targets(
+        str(worktrees["base"]), str(worktrees["head"]), profile="revisions", suite="mod.py", rounds=2,
+        store=Store(tmp / "s.parquet"), flags={"processes": 2, "values": 2, "loops": 50, "warmups": 0},
+        filter=harnesses.exact_filter(["f"]), out=tmp / "out", run_key="bare")  # pyperf is the default
+    assert [u["workload"]["name"] for u in doc["units"]] == ["f"]
+    order = json.loads(Path(tmp / "out" / "orders" / "order-0001.json").read_text())
+    assert (order["suites"][0]["adapter"], order["target"]["kind"]) == ("pyperf", "working_tree")
+    assert order["target"]["path"] == str(worktrees["head"].resolve())
