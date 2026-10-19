@@ -25,7 +25,7 @@ bx compare --run KEY --profile revisions|environments --baseline VALUE
                                          # read mode: compare results already measured
 bx target describe|prepare TARGET        # a target's description (a provider's answer, or a build directory's sidecar)
 bx compare BASELINE CONTENDER --profile revisions|environments
-           [--adapter google-benchmark|pyperf]
+           [--adapter pyperf|google-benchmark]                  # default pyperf
            --suite NAME [--filter REGEX] [--quantity wall-time]
            --rounds R [-e NAME=VALUE ...]
            [--repetitions N]                                    # google-benchmark
@@ -35,27 +35,49 @@ bx compare BASELINE CONTENDER --profile revisions|environments
            [--run-key KEY] [--out DIR] [--no-build] [--source-uri URI]
            [--k 3] [--min-rounds 3] [--json]
                                          # measure mode: run both sides, then compare
-bx bench MODULE [FUNCTION …] [--processes N] [--values N] [--min-time S | --loops N] [--warmups N]
-         [-e NAME=VALUE] [--tree DIR] [--project P] [--run-key KEY] [--source-uri URI]
-         [--case-timeout S] [--out DIR] [--no-ingest]
-                                         # Python functions under pyperf → result files → store → table
+bx bench TARGET --suite NAME [CASE …]    # the single-target form of bx compare: one order, a table
+         [--adapter …] [--filter REGEX] [--quantity …] [-e NAME=VALUE ...]
+         [precision flags, as for bx compare]
+         [--project P] [--run-key KEY] [--out DIR] [--no-build] [--source-uri URI]
+         [--case-timeout S] [--no-ingest]
+bx bench MODULE.py [FUNCTION …] [--tree DIR] [...]
+                                         # shorthand: the module's checkout, pyperf → result files → store → table
 bx config init [--dir DIR]               # write .benchx/config.json stating pyperf's defaults
 ```
 
-`bx bench` is a second front end to the same runner. It builds one work order
-whose target is the `working_tree` of the git checkout containing MODULE (or
-`--tree`), as found, with the dirty state and tree id recorded; the suite is the
-module, a case is a function in it (`bench_*` and `benchmark_*` by default, or the
-functions named), and `-e` fills `environment_variables`. Precision is resolved
-before the order is written, flags over `.benchx/config.json` (found by walking up
-from the current directory) over pyperf's defaults, so the order always states
-what applied. The pyperf adapter takes `python` from the `PATH` the workers start
-with and refuses the order if pyperf is not importable there. Delivery is as for
-`bx run`. There is no comparison step: `bx bench` produces results, and comparing
-them is not part of it.
+`bx bench` is the single-target form of `bx compare` (measure mode). It names a
+target the same way, takes the same options, and goes through the same code:
+the side is resolved by `session._side` (a provider call for `@CONFIG`, else a
+bare path the harness reads; the adapter checks the suite before anything runs)
+and the order is built by `session._order`. A bench run is one order of a
+comparison session with no round, no slot, and no comparison; it is run by the
+same runner, delivered as `bx run` delivers (`--no-ingest`: files only), and
+summarized as a table of its cases. It is not `bx run`: that executes a finished
+order file and never resolves a target; `bx bench` turns options into an order
+(saved as `results/RUN_KEY/orders/order.json`, which `bx run` can replay) and
+then does what `bx run` does.
+
+A bare path is read by the harness. For Google Benchmark it is
+`BUILD_DIR[:SOURCE_DIR]`, a `build` target. For pyperf it is a working tree, a
+`working_tree` target that is its own source, measured as found with its dirty
+state and tree id recorded; `--suite` is the module's path in it, and a case is
+a function in it (`bench_*` and `benchmark_*` by default). A case named on the
+command line is an exact name; `--filter` is a regex; not both. `-e` fills
+`environment_variables`. Precision is resolved before the order is written,
+flags over the harness's defaults and, for pyperf, over `.benchx/config.json`
+(found by walking up from the current directory), so the order always states
+what applied; a flag the chosen harness does not take is refused, as in
+`bx compare`. The pyperf adapter takes `python` from the `PATH` the workers
+start with and refuses the order if pyperf is not importable there. Both
+commands default to pyperf.
+
+`bx bench MODULE.py [FUNCTION …]` is a shorthand for the pyperf form: the target
+is the git checkout containing the module (or `--tree`), the suite is the
+module's path in it, and the functions are exact case names. Without `--suite`,
+a TARGET ending in `.py` selects it.
 
 `bx compare` has two modes, chosen by its arguments. Two positional targets
-(`BUILD_DIR[:SOURCE_DIR]` or `@CONFIG[=SOURCE_REF]`, a call to the project's
+(a path read by the harness, or `@CONFIG[=SOURCE_REF]`, a call to the project's
 target provider) mean measure mode; `--run` means read mode; giving
 both or neither is an error, as is a flag that belongs to the other mode
 (`--baseline` and `--results` are read mode only, since measure mode derives
@@ -96,7 +118,8 @@ not post to the original store.
 of its own. One order is one side of one round: the runner executes one order
 per invocation (`runner.md` §7), and the prototype accepts two target kinds:
 `build`, an existing build directory with an optional `source_dir`, and
-`working_tree`, a checkout measured as found, which only `bx bench` writes. The
+`working_tree`, a checkout measured as found, which comes from a provider or from
+a bare path read by pyperf. The
 runner never builds either (`runner.md` §1).
 
 Interleaving needs two order fields. `round` is native to the schema and is
@@ -477,7 +500,7 @@ history grow from run to run, and the demo ends with `bx head`.
 
 ## 7. Deliberate simplifications
 
-- Two harnesses (Google Benchmark, and pyperf through `bx bench`) and two target
+- Two harnesses (pyperf and Google Benchmark, through `bx bench` and `bx compare`) and two target
   kinds (`build`, `working_tree`). The runner builds nothing, ever: the user
   prepares both sides (`benchmark-environments.md` §2). The prototype applies
   `environment_variables` and defers the rest of the environment policy, and it
