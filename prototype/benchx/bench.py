@@ -7,16 +7,15 @@ checked out; the tree is measured as found.
 """
 
 import json
-import re
 import statistics
 from pathlib import Path
 
-from . import config, orders, runner, snapshot
+from . import harnesses, orders, runner, snapshot
+from .errors import SessionError
 from .identity import normalize_remote
 from .orders import CASE_TIMEOUT_S, ORDER_TIMEOUT_S
-from .errors import SessionError
 
-ADAPTER = "pyperf"
+HARNESS = harnesses.PYPERF
 
 
 def tree_of(module: Path, tree=None) -> Path:
@@ -27,26 +26,10 @@ def tree_of(module: Path, tree=None) -> Path:
     return Path(top).resolve() if top else module.parent.resolve()
 
 
-def case_filter(functions) -> str | None:
-    """Exact names as one regex; None leaves the adapter's default (bench_*, benchmark_*)."""
-    return "^(" + "|".join(re.escape(f) for f in functions) + ")$" if functions else None
-
-
 def flags_to_precision(processes=None, values=None, min_time=None, loops=None, warmups=None) -> dict:
     """The flags that set precision, spelled as a work-order `precision`."""
-    if min_time is not None and loops is not None:
-        raise SessionError("--min-time and --loops both set calibration; give one")
-    precision = {}
-    levels = [{"unit": unit, "n": n} for unit, n in (("process", processes), ("value", values)) if n is not None]
-    if levels:
-        precision["repetitions"] = {"mode": "fixed", "levels": levels}
-    if min_time is not None:
-        precision["calibration"] = {"mode": "adaptive", "minimum_sample_seconds": min_time}
-    if loops is not None:
-        precision["calibration"] = {"mode": "fixed", "n_iterations": loops}
-    if warmups is not None:
-        precision["warmup"] = {"mode": "count", "n_warmup": warmups} if warmups else {"mode": "none"}
-    return precision
+    return HARNESS.flags_to_precision(processes=processes, values=values, min_time=min_time,
+                                      loops=loops, warmups=warmups)
 
 
 def build_order(module, functions, *, tree=None, precision_flags=None, environment_variables=None,
@@ -60,10 +43,8 @@ def build_order(module, functions, *, tree=None, precision_flags=None, environme
         suite = module.relative_to(root).as_posix()
     except ValueError:
         raise SessionError(f"{module} is not inside the tree {root}; give --tree") from None
-    precision, config_path = config.resolve(ADAPTER, precision_flags, start=cwd)
-    entry = {"adapter": ADAPTER, "suite": suite}
-    if functions:
-        entry["filter"] = case_filter(functions)
+    precision, config_path = HARNESS.precision(precision_flags, start=cwd)
+    entry = HARNESS.suite_entry(suite, harnesses.exact_filter(functions))
     target = {"kind": "working_tree", "path": str(root), "source_dir": str(root),
               "source": {"uri": normalize_remote(source_uri) if source_uri else snapshot.source_uri(str(root)), "type": "git"}}
     try:

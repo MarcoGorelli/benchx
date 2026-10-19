@@ -16,11 +16,13 @@ import json
 from pathlib import Path
 
 from . import compare as compare_mod
-from . import orders, runner, snapshot, target as target_mod
+from . import harnesses, orders, runner, snapshot, target as target_mod
 from .errors import SessionError
 from .identity import normalize_remote
 
 PROFILES = ("revisions", "environments")
+# Measure mode drives Google Benchmark suites only, for now (prototype-scope.md).
+HARNESS = harnesses.GOOGLE_BENCHMARK
 
 
 def parse_target(text: str) -> tuple[str, str | None]:
@@ -82,12 +84,8 @@ def _side(spec: str, suite: str, operation: str) -> dict:
 def _order(side: dict, *, suite, filter, quantity, repetitions, min_time, project, run_key, source_uri,
            round_, slot, labels) -> dict:
     """One side's order for one round: a Google Benchmark suite in a build directory."""
-    precision = {"repetitions": repetitions}
-    if min_time is not None:
-        precision["calibration"] = {"mode": "adaptive", "minimum_sample_seconds": min_time}
-    entry = {"adapter": "google-benchmark", "suite": suite}
-    if filter:
-        entry["filter"] = filter
+    precision, _ = HARNESS.precision(HARNESS.flags_to_precision(repetitions=repetitions, min_time=min_time))
+    entry = HARNESS.suite_entry(suite, filter)
     target = {"kind": "build", "path": str(side["build"]), "source_dir": side["source"],
               "source": {"uri": source_uri, "type": "git"}, **side["text"]}
     try:
