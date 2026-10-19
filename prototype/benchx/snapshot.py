@@ -88,20 +88,24 @@ def observed_context(child_env: dict, env_names=None) -> dict:
     return facts
 
 
+# Bytecode caches are written by running the suite, so they must not change the tree id.
+_PYCACHE_EXCLUDE = ":(exclude,glob)**/__pycache__/**"
+
+
 def git_identity(path) -> dict | None:
     """Revision, dirty state, and working-tree id of a checkout (schema §4.1)."""
     top = _run(["git", "rev-parse", "--show-toplevel"], cwd=path)
     head = top and _run(["git", "rev-parse", "HEAD"], cwd=top)
     if not head:
         return None
-    status = _run(["git", "status", "--porcelain", "--untracked-files=all"], cwd=top)
+    status = _run(["git", "status", "--porcelain", "--untracked-files=all", "--", ".", _PYCACHE_EXCLUDE], cwd=top)
     # A scratch index that does not exist yet, so the repository's own index
     # is untouched (schema §4.1).
     with tempfile.TemporaryDirectory() as tmp:
         index = os.path.join(tmp, "index")
         env = {**os.environ, "GIT_INDEX_FILE": index}
         try:
-            subprocess.run(["git", "add", "-A"], cwd=top, env=env, check=True, capture_output=True)
+            subprocess.run(["git", "add", "-A", "--", ".", _PYCACHE_EXCLUDE], cwd=top, env=env, check=True, capture_output=True)
             tree = subprocess.run(["git", "write-tree"], cwd=top, env=env, check=True,
                                   capture_output=True, text=True).stdout.strip()
         except (OSError, subprocess.CalledProcessError):

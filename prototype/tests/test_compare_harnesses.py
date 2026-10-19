@@ -95,6 +95,7 @@ def test_pyperf_revisions_end_to_end(tmp, worktrees, monkeypatch):
     doc = session.compare_targets(
         "@base", "@head", profile="revisions", suite="mod.py", rounds=3, store=Store(tmp / "s.parquet"),
         adapter="pyperf", flags={"processes": 2, "values": 2, "loops": 50, "warmups": 1},
+        filter=harnesses.exact_filter(["f"]),  # the default case set is bench_*/benchmark_* functions
         environment_variables={"OPENBLAS_NUM_THREADS": "1"}, out=tmp / "out", run_key="py")
     assert [u["workload"]["name"] for u in doc["units"]] == ["f"]
     assert doc["units"][0]["workload"]["parameters"] == {"OPENBLAS_NUM_THREADS": "1"}
