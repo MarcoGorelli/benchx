@@ -9,13 +9,12 @@ checked out; the tree is measured as found.
 import json
 import re
 import statistics
-import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 
-from . import config, core, runner, snapshot
+from . import config, orders, runner, snapshot
 from .identity import normalize_remote
-from .session import CASE_TIMEOUT_S, ORDER_TIMEOUT_S, SessionError, _source_uri
+from .orders import CASE_TIMEOUT_S, ORDER_TIMEOUT_S
+from .session import SessionError, _source_uri
 
 ADAPTER = "pyperf"
 
@@ -65,30 +64,14 @@ def build_order(module, functions, *, tree=None, precision_flags=None, environme
     entry = {"adapter": ADAPTER, "suite": suite}
     if functions:
         entry["filter"] = case_filter(functions)
-    run_key = run_key or "bench-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    order = {
-        "schema_version": "benchx/work-order/0.1.0",
-        "work_order_id": f"urn:uuid:{uuid.uuid4()}",
-        "state": "resolved",
-        "suites": [entry],
-        "target": {"kind": "working_tree", "path": str(root), "source_dir": str(root),
-                   "source": {"uri": normalize_remote(source_uri) if source_uri else _source_uri(str(root)), "type": "git"}},
-        "quantities": ["wall-time"],
-        "precision": precision,
-        "timeouts": {"case_s": case_s, "order_s": order_s},
-        "run_key": run_key,
-        "requester": {"kind": "workbench", "name": "bx"},
-        "plan": [{"id": "p0", "case": "*", "quantity": "wall-time"}],
-    }
-    if environment_variables:
-        order["environment_variables"] = dict(environment_variables)
-    if project:
-        order["project"] = project
-    if labels:
-        order["labels"] = labels
-    errors = core.check(order, "work-order")
-    if errors:
-        raise SessionError("; ".join(str(error) for error in errors))
+    target = {"kind": "working_tree", "path": str(root), "source_dir": str(root),
+              "source": {"uri": normalize_remote(source_uri) if source_uri else _source_uri(str(root)), "type": "git"}}
+    try:
+        order = orders.make_order(suite=entry, target=target, precision=precision,
+                                  run_key=run_key or orders.default_run_key("bench"), case_s=case_s, order_s=order_s,
+                                  project=project, labels=labels, environment_variables=environment_variables)
+    except orders.OrderError as e:
+        raise SessionError(str(e)) from None
     return order, config_path
 
 

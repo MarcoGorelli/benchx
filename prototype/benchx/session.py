@@ -13,16 +13,13 @@ target-provider role.
 """
 
 import json
-import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 
 from . import compare as compare_mod
-from . import runner, snapshot, target as target_mod
+from . import orders, runner, snapshot, target as target_mod
 from .identity import normalize_remote
 
 PROFILES = ("revisions", "environments")
-CASE_TIMEOUT_S, ORDER_TIMEOUT_S = 60, 600
 
 
 class SessionError(Exception):
@@ -97,36 +94,21 @@ def _side(spec: str, suite: str, operation: str) -> dict:
 
 def _order(side: dict, *, suite, filter, quantity, repetitions, min_time, project, run_key, source_uri,
            round_, slot, labels) -> dict:
+    """One side's order for one round: a Google Benchmark suite in a build directory."""
     precision = {"repetitions": repetitions}
     if min_time is not None:
         precision["calibration"] = {"mode": "adaptive", "minimum_sample_seconds": min_time}
     entry = {"adapter": "google-benchmark", "suite": suite}
     if filter:
         entry["filter"] = filter
-    order = {
-        "schema_version": "benchx/work-order/0.1.0",
-        "work_order_id": f"urn:uuid:{uuid.uuid4()}",
-        "state": "resolved",
-        "suites": [entry],
-        "target": {"kind": "build", "path": str(side["build"]), "source_dir": side["source"],
-                   "source": {"uri": source_uri, "type": "git"}, **side["text"]},
-        "quantities": [quantity],
-        "precision": precision,
-        "timeouts": {"case_s": CASE_TIMEOUT_S, "order_s": ORDER_TIMEOUT_S},
-        "run_key": run_key,
-        "requester": {"kind": "workbench", "name": "bx"},
-        # Placeholder: the runner does not yet cross-check plan against the
-        # case list it discovers from the binary (runner-schema.md §3.2).
-        "plan": [{"id": "p0", "case": "*", "quantity": quantity}],
-        "round": round_,
-        "slot": slot,
-    }
-    labels = {**side["labels"], **(labels or {})}
-    if labels:
-        order["labels"] = labels
-    if project:
-        order["project"] = project
-    return order
+    target = {"kind": "build", "path": str(side["build"]), "source_dir": side["source"],
+              "source": {"uri": source_uri, "type": "git"}, **side["text"]}
+    try:
+        return orders.make_order(suite=entry, target=target, precision=precision, quantity=quantity,
+                                 run_key=run_key, project=project, labels={**side["labels"], **(labels or {})},
+                                 round_=round_, slot=slot)
+    except orders.OrderError as e:
+        raise SessionError(f"work order for round {round_}: {e}") from None
 
 
 def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, rounds: int, store,
@@ -167,7 +149,7 @@ def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, 
         raise SessionError(f"the sides report different source URIs {sorted(uris)}; pass --source-uri")
     source_uri = uris.pop()
 
-    run_key = run_key or "compare-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    run_key = run_key or orders.default_run_key("compare")
     out = Path(out) if out else Path("results") / run_key.replace("/", "_")
     (out / "orders").mkdir(parents=True, exist_ok=True)
     labels = [{label[0]: label[1]}, {label[0]: label[2]}] if label else [None, None]
