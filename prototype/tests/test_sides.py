@@ -68,8 +68,9 @@ def test_a_provided_working_tree_is_its_own_source(tree, monkeypatch):
 def test_a_working_tree_order_is_valid(tree, monkeypatch):
     provided(monkeypatch, description(tree))
     side = session._side("@tree", SUITE, "prepare")
-    order = session._order(side, suite=SUITE, filter=None, quantity="wall-time", repetitions=3, min_time=None,
-                           project=None, run_key="rk", source_uri=SOURCE_URI, round_=0, slot=0, labels=None)
+    order = session._order(side, harness=session.HARNESS, suite=SUITE, filter=None, quantity="wall-time",
+                           precision={"repetitions": 3}, environment_variables=None, project=None, run_key="rk",
+                           source_uri=SOURCE_URI, round_=0, slot=0, labels=None)
     assert order["target"]["kind"] == "working_tree"
     assert order["target"]["source_dir"] == str(tree.resolve())
     assert core.check(order, "work-order") == []

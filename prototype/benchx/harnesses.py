@@ -101,6 +101,8 @@ class Pyperf(Harness):
 GOOGLE_BENCHMARK = GoogleBenchmark()
 PYPERF = Pyperf()
 HARNESSES = {h.name: h for h in (GOOGLE_BENCHMARK, PYPERF)}
+# Every precision flag some harness takes, each once, in a stable order (for a CLI).
+FLAG_NAMES = tuple(dict.fromkeys(name for h in HARNESSES.values() for name in h.FLAGS))
 
 
 def get(name: str) -> Harness:

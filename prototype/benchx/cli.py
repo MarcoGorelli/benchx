@@ -14,7 +14,7 @@ from typing import get_args
 from . import bench as bench_mod
 from . import compare as compare_mod
 from . import config as config_mod
-from . import core, runner, session
+from . import core, harnesses, runner, session
 from . import target as target_mod
 from .core.validation import Kind
 from .store import Store
@@ -48,16 +48,25 @@ def cmd_run(args):
     return _report(store.ingest_paths(summary["files"]))
 
 
+def _environment(items) -> dict:
+    """`-e NAME=VALUE`, repeated, as a mapping; UsageError on a malformed item."""
+    env = {}
+    for item in items or []:
+        name, eq, value = item.partition("=")
+        if not (name and eq):
+            raise UsageError(f"-e wants NAME=VALUE, not {item!r}")
+        env[name] = value
+    return env
+
+
 def cmd_bench(args):
     """Benchmark functions of a Python module with pyperf: build the order from
     the config file, flags and environment variables, run it, deliver, print a table."""
-    env = {}
-    for item in args.env or []:
-        name, eq, value = item.partition("=")
-        if not (name and eq):
-            print(f"bx bench: error: -e wants NAME=VALUE, not {item!r}", file=sys.stderr)
-            return EXIT_REFUSED
-        env[name] = value
+    try:
+        env = _environment(args.env)
+    except UsageError as e:
+        print(f"bx bench: error: {e}", file=sys.stderr)
+        return EXIT_REFUSED
     try:
         flags = bench_mod.flags_to_precision(args.processes, args.values, args.min_time, args.loops, args.warmups)
         order, config_path = bench_mod.build_order(
@@ -165,8 +174,8 @@ class UsageError(Exception):
 
 
 # Flags that belong to one mode of `bx compare` (prototype-design.md §1).
-_MEASURE_ONLY = ("suite", "filter", "quantity", "rounds", "repetitions", "min_time", "project", "run_key",
-                 "out", "source_uri", "no_build")
+_MEASURE_ONLY = ("adapter", "suite", "filter", "quantity", "rounds", "env", *harnesses.FLAG_NAMES, "project",
+                 "run_key", "out", "source_uri", "no_build")
 _READ_ONLY = ("baseline", "results")
 
 
@@ -223,13 +232,17 @@ def _measure(args):
         label = session.parse_label(args.label) if args.label else None
         doc = session.compare_targets(
             *args.targets, profile=args.profile, suite=args.suite, rounds=args.rounds, store=store,
-            filter=args.filter, quantity=args.quantity or "wall-time", repetitions=args.repetitions or 5,
-            min_time=args.min_time, project=args.project, label=label, run_key=args.run_key, out=args.out,
-            source_uri=args.source_uri, k=args.k, min_rounds=args.min_rounds, build=not args.no_build,
-            progress=lambda message: print(message, file=sys.stderr))
+            adapter=args.adapter, flags={name: getattr(args, name) for name in harnesses.FLAG_NAMES},
+            environment_variables=_environment(args.env), filter=args.filter,
+            quantity=args.quantity or "wall-time", project=args.project, label=label, run_key=args.run_key,
+            out=args.out, source_uri=args.source_uri, k=args.k, min_rounds=args.min_rounds,
+            build=not args.no_build, progress=lambda message: print(message, file=sys.stderr))
     except runner.Refused as e:
         return _refused(e)
-    except (session.SessionError, compare_mod.CompareError) as e:
+    except UsageError as e:
+        print(f"bx compare: error: {e}", file=sys.stderr)
+        return EXIT_REFUSED
+    except (session.SessionError, compare_mod.CompareError, config_mod.ConfigError) as e:
         print(f"cannot compare: {e}", file=sys.stderr)
         return EXIT_REFUSED
     print(json.dumps(doc, indent=1) if args.json else compare_mod.render(doc))
@@ -327,7 +340,7 @@ def main(argv=None):
 
     p = sub.add_parser("compare", help="compare two sides: read mode (--run) or measure mode (two targets)",
                        description="Read mode compares results already measured: --run KEY --baseline VALUE. "
-                                   "Measure mode runs two prepared build directories, alternating them over "
+                                   "Measure mode runs two prepared targets, alternating them over "
                                    "--rounds rounds, delivers the results to the local store, then compares: "
                                    "BASELINE CONTENDER --suite NAME --rounds R, each target BUILD_DIR[:SOURCE_DIR] "
                                    "or @CONFIG[=SOURCE_REF] (the project's target provider).")
@@ -344,12 +357,24 @@ def main(argv=None):
     read.add_argument("--results", nargs="+",
                       help="compare these result directories through a throwaway store, not the local one")
     measure = p.add_argument_group("measure mode")
-    measure.add_argument("--suite", help="the benchmark binary in each build directory")
-    measure.add_argument("--filter", help="a Google Benchmark filter regex")
-    measure.add_argument("--quantity", help="wall-time (default) or cpu-time")
+    measure.add_argument("--adapter", choices=sorted(harnesses.HARNESSES),
+                         help=f"the harness both sides run (default {session.HARNESS.name})")
+    measure.add_argument("--suite", help="google-benchmark: the binary in each target; "
+                                         "pyperf: the module's path in each target")
+    measure.add_argument("--filter", help="a case filter regex (google-benchmark: --benchmark_filter; "
+                                          "pyperf: function names)")
+    measure.add_argument("--quantity", help="wall-time (default); google-benchmark also cpu-time")
     measure.add_argument("--rounds", type=int, help="alternation rounds; each runs both sides once")
-    measure.add_argument("--repetitions", type=int, help="repetitions per case (default 5)")
-    measure.add_argument("--min-time", type=float, help="minimum sample seconds (harness default if omitted)")
+    measure.add_argument("-e", "--env", action="append", metavar="NAME=VALUE",
+                         help="set an environment variable for both sides (repeatable); "
+                              "each becomes a workload parameter")
+    measure.add_argument("--repetitions", type=int,
+                         help=f"google-benchmark: repetitions per case (default {harnesses.GOOGLE_BENCHMARK.DEFAULT_REPETITIONS})")
+    measure.add_argument("--processes", type=int, help="pyperf: worker processes")
+    measure.add_argument("--values", type=int, help="pyperf: values per process")
+    measure.add_argument("--min-time", type=float, help="adaptive calibration: minimum seconds per sample")
+    measure.add_argument("--loops", type=int, help="pyperf: fixed calibration, inner loops per value")
+    measure.add_argument("--warmups", type=int, help="pyperf: warmup values per process (0: none)")
     measure.add_argument("--project", help="name a project, so the results join its series; omit for an ad hoc run")
     measure.add_argument("--run-key", help="default: compare-<UTC timestamp>")
     measure.add_argument("--out", help="directory for orders and result files (default ./results/RUN_KEY)")

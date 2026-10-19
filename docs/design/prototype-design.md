@@ -25,8 +25,12 @@ bx compare --run KEY --profile revisions|environments --baseline VALUE
                                          # read mode: compare results already measured
 bx target describe|prepare TARGET        # a target's description (a provider's answer, or a build directory's sidecar)
 bx compare BASELINE CONTENDER --profile revisions|environments
+           [--adapter google-benchmark|pyperf]
            --suite NAME [--filter REGEX] [--quantity wall-time]
-           --rounds R [--repetitions N] [--min-time S]
+           --rounds R [-e NAME=VALUE ...]
+           [--repetitions N]                                    # google-benchmark
+           [--processes N] [--values N] [--loops N] [--warmups N] # pyperf
+           [--min-time S]
            [--project P] [--label NAME=BASE,CONTENDER]
            [--run-key KEY] [--out DIR] [--no-build] [--source-uri URI]
            [--k 3] [--min-rounds 3] [--json]

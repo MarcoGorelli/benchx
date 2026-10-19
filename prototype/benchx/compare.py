@@ -16,6 +16,9 @@ from .store import store_project
 
 METHOD = {"name": "benchx/paired-relative", "version": "v1", "effect_measure": "relative"}
 # Observed-context keys that change between any two attempts; not caveats.
+# google_benchmark holds the load average; pyperf's key is not here on purpose:
+# it holds only facts that held for every run (CPU config, ASLR, boot time),
+# so a difference between the sides is a real caveat.
 VOLATILE = {"load_avg_1m", "google_benchmark"}
 
 
