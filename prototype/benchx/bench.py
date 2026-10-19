@@ -14,7 +14,7 @@ from pathlib import Path
 from . import config, orders, runner, snapshot
 from .identity import normalize_remote
 from .orders import CASE_TIMEOUT_S, ORDER_TIMEOUT_S
-from .session import SessionError, _source_uri
+from .errors import SessionError
 
 ADAPTER = "pyperf"
 
@@ -65,7 +65,7 @@ def build_order(module, functions, *, tree=None, precision_flags=None, environme
     if functions:
         entry["filter"] = case_filter(functions)
     target = {"kind": "working_tree", "path": str(root), "source_dir": str(root),
-              "source": {"uri": normalize_remote(source_uri) if source_uri else _source_uri(str(root)), "type": "git"}}
+              "source": {"uri": normalize_remote(source_uri) if source_uri else snapshot.source_uri(str(root)), "type": "git"}}
     try:
         order = orders.make_order(suite=entry, target=target, precision=precision,
                                   run_key=run_key or orders.default_run_key("bench"), case_s=case_s, order_s=order_s,

@@ -14,6 +14,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from .identity import normalize_remote
+
 # §3.1: never the whole environment; only variables that shape execution: the
 # thread and device variables, and the dynamic loader's search variables. No
 # build or environment management tool is named; a project extends the list
@@ -110,6 +112,17 @@ def git_identity(path) -> dict | None:
     else:
         identity["dirty"] = "unknown"
     return identity
+
+
+def source_uri(source_dir) -> str:
+    """One canonical URI for every worktree of a repository, so both sides of a
+    comparison report the same source: the origin remote, else the shared git
+    directory's parent, else the directory itself."""
+    origin = _run(["git", "remote", "get-url", "origin"], cwd=source_dir)
+    if origin:
+        return normalize_remote(origin, base=source_dir)
+    common = _run(["git", "rev-parse", "--git-common-dir"], cwd=source_dir)
+    return Path(source_dir, common).resolve().parent.as_uri() if common else Path(source_dir).resolve().as_uri()
 
 
 _SKIPPED_DIRS = {".git", ".benchx", "__pycache__"}

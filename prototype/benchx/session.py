@@ -17,13 +17,10 @@ from pathlib import Path
 
 from . import compare as compare_mod
 from . import orders, runner, snapshot, target as target_mod
+from .errors import SessionError
 from .identity import normalize_remote
 
 PROFILES = ("revisions", "environments")
-
-
-class SessionError(Exception):
-    """The session cannot start or finish; the message says why."""
 
 
 def parse_target(text: str) -> tuple[str, str | None]:
@@ -41,16 +38,6 @@ def parse_label(text: str) -> tuple[str, str, str]:
     if not (name and base and comma and contender) or "," in contender:
         raise SessionError(f"--label must be NAME=BASE,CONTENDER in measure mode, not {text!r}")
     return name, base, contender
-
-
-def _source_uri(source_dir: str) -> str:
-    """One canonical URI for every worktree of a repository, so both sides of a
-    comparison report the same source."""
-    origin = snapshot._run(["git", "remote", "get-url", "origin"], cwd=source_dir)
-    if origin:
-        return normalize_remote(origin, base=source_dir)
-    common = snapshot._run(["git", "rev-parse", "--git-common-dir"], cwd=source_dir)
-    return Path(source_dir, common).resolve().parent.as_uri() if common else Path(source_dir).resolve().as_uri()
 
 
 def _side(spec: str, suite: str, operation: str) -> dict:
@@ -143,7 +130,7 @@ def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, 
     if source_uri:
         uris = {normalize_remote(source_uri)}
     else:
-        uris = {normalize_remote(side["uri"], base=side["source"]) if side["uri"] else _source_uri(side["source"])
+        uris = {normalize_remote(side["uri"], base=side["source"]) if side["uri"] else snapshot.source_uri(side["source"])
                 for side in sides}
     if len(uris) != 1:
         raise SessionError(f"the sides report different source URIs {sorted(uris)}; pass --source-uri")
