@@ -13,20 +13,17 @@ target-provider role.
 """
 
 import json
-import uuid
-from datetime import datetime, timezone
+import os
 from pathlib import Path
 
+from . import adapters, harnesses, orders, runner, snapshot, target as target_mod
 from . import compare as compare_mod
-from . import runner, snapshot, target as target_mod
+from .adapters.base import Unsupported
+from .errors import SessionError
 from .identity import normalize_remote
 
 PROFILES = ("revisions", "environments")
-CASE_TIMEOUT_S, ORDER_TIMEOUT_S = 60, 600
-
-
-class SessionError(Exception):
-    """The session cannot start or finish; the message says why."""
+HARNESS = harnesses.PYPERF  # the default; `adapter` picks another
 
 
 def parse_target(text: str) -> tuple[str, str | None]:
@@ -46,101 +43,155 @@ def parse_label(text: str) -> tuple[str, str, str]:
     return name, base, contender
 
 
-def _source_uri(source_dir: str) -> str:
-    """One canonical URI for every worktree of a repository, so both sides of a
-    comparison report the same source."""
-    origin = snapshot._run(["git", "remote", "get-url", "origin"], cwd=source_dir)
-    if origin:
-        return normalize_remote(origin, base=source_dir)
-    common = snapshot._run(["git", "rev-parse", "--git-common-dir"], cwd=source_dir)
-    return Path(source_dir, common).resolve().parent.as_uri() if common else Path(source_dir).resolve().as_uri()
+KINDS = ("build", "working_tree")
 
 
-def _side(spec: str, suite: str, operation: str) -> dict:
+def _side(spec: str, suite: str, operation: str, harness=None, environment_variables=None) -> dict:
     """Locate and identify one side before anything runs.
 
-    `spec` is `@CONFIG[=SOURCE_REF]` (ask the provider to `operation`) or
-    `BUILD_DIR[:SOURCE_DIR]` (read the build directory's sidecar, if any).
+    `spec` is `@CONFIG[=SOURCE_REF]` (ask the provider to `operation`) or a
+    bare path, which the harness reads: Google Benchmark's is
+    `BUILD_DIR[:SOURCE_DIR]` (read the build directory's sidecar, if any), and
+    pyperf's is a working tree, its own source. A provider's description says
+    which kind it is. The harness's adapter checks that the suite is there and
+    usable, as the runner will, so a side it would refuse is refused before
+    any round runs.
     """
+    harness = harness or HARNESS
     try:
         description = target_mod.resolve(spec, operation=operation)
     except target_mod.TargetError as e:
         raise SessionError(str(e)) from None
     source = None
     if description:
-        if description["target"]["kind"] != "build":
-            raise SessionError(f"{spec}: only build targets are supported; "
-                               f"{description['target']['kind']!r} is deferred")
+        kind = description["target"]["kind"]
+        if kind not in KINDS:
+            raise SessionError(f"{spec}: only build and working_tree targets are supported; {kind!r} is deferred")
         if "build" in description:
             raise SessionError(f"{spec}: a declared build is deferred in the prototype "
                                "(the runner reads CMakeCache.txt)")
-        build = description["target"]["path"]
-        source = description["target"].get("source_dir")
+        path = description["target"]["path"]
+        # A working tree is its own source, as for the runner.
+        source = description["target"].get("source_dir") or (path if kind == "working_tree" else None)
         uri = description["target"]["source"]["uri"]
     else:
-        build, source = parse_target(spec)
+        kind = harness.BARE_PATH_KIND
+        path, source = parse_target(spec) if kind == "build" else (spec, spec)  # a working tree is its own source
         uri = None
-    build = Path(build).resolve()
-    if not build.is_dir():
-        raise SessionError(f"build directory not found: {build}")
-    if not (build / suite).is_file():
-        raise SessionError(f"suite binary not found: {build / suite}")
-    if ":" in spec and not spec.startswith("@"):
+    path = Path(path).resolve()
+    if not path.is_dir():
+        raise SessionError(f"{'build directory' if kind == 'build' else 'working tree'} not found: {path}")
+    try:
+        # The environment the runner will give the harness: inherited, plus the order's variables.
+        adapters.get(harness.name).locate(path, suite, {**os.environ, **(environment_variables or {})})
+    except Unsupported as e:
+        raise SessionError("; ".join(str(problem) for problem in e.problems)) from None
+    if kind == "build" and ":" in spec and not spec.startswith("@"):
         source = parse_target(spec)[1] or source
-    source = source or snapshot.cmake_source_dir(build)
-    identity = source and snapshot.git_identity(source)
-    if not identity:
-        raise SessionError(f"cannot locate the checkout {build} was built from; give BUILD_DIR:SOURCE_DIR")
-    return {"build": build, "source": identity["path"], "identity": identity, "uri": uri,
+    if kind == "build":
+        source = source or snapshot.cmake_source_dir(path)
+        identity = source and snapshot.git_identity(source)
+        if not identity:
+            raise SessionError(f"cannot locate the checkout {path} was built from; give BUILD_DIR:SOURCE_DIR")
+    else:
+        identity = snapshot.git_identity(source) or snapshot.directory_identity(source)
+        if not identity:
+            raise SessionError(f"cannot identify the working tree {source}")
+    return {"kind": kind, "path": path, "source": identity["path"], "identity": identity, "uri": uri,
             "text": target_mod.text(description), "labels": dict((description or {}).get("labels", {}))}
 
 
-def _order(side: dict, *, suite, filter, quantity, repetitions, min_time, project, run_key, source_uri,
-           round_, slot, labels) -> dict:
-    precision = {"repetitions": repetitions}
-    if min_time is not None:
-        precision["calibration"] = {"mode": "adaptive", "minimum_sample_seconds": min_time}
-    entry = {"adapter": "google-benchmark", "suite": suite}
-    if filter:
-        entry["filter"] = filter
-    order = {
-        "schema_version": "benchx/work-order/0.1.0",
-        "work_order_id": f"urn:uuid:{uuid.uuid4()}",
-        "state": "resolved",
-        "suites": [entry],
-        "target": {"kind": "build", "path": str(side["build"]), "source_dir": side["source"],
-                   "source": {"uri": source_uri, "type": "git"}, **side["text"]},
-        "quantities": [quantity],
-        "precision": precision,
-        "timeouts": {"case_s": CASE_TIMEOUT_S, "order_s": ORDER_TIMEOUT_S},
-        "run_key": run_key,
-        "requester": {"kind": "workbench", "name": "bx"},
-        # Placeholder: the runner does not yet cross-check plan against the
-        # case list it discovers from the binary (runner-schema.md §3.2).
-        "plan": [{"id": "p0", "case": "*", "quantity": quantity}],
-        "round": round_,
-        "slot": slot,
-    }
-    labels = {**side["labels"], **(labels or {})}
-    if labels:
-        order["labels"] = labels
-    if project:
-        order["project"] = project
-    return order
+def _order(side: dict, *, harness, suite, filter, quantity, precision, environment_variables, project, run_key,
+           source_uri, round_=None, slot=None, labels=None, case_s=orders.CASE_TIMEOUT_S,
+           order_s=orders.ORDER_TIMEOUT_S) -> dict:
+    """One side's order; for one round and slot of a comparison, or neither (`bx bench`)."""
+    target = {"kind": side["kind"], "path": str(side["path"]), "source_dir": side["source"],
+              "source": {"uri": source_uri, "type": "git"}, **side["text"]}
+    try:
+        return orders.make_order(suite=harness.suite_entry(suite, filter), target=target, precision=precision,
+                                 quantity=quantity, run_key=run_key, project=project,
+                                 labels={**side["labels"], **(labels or {})}, case_s=case_s, order_s=order_s,
+                                 environment_variables=environment_variables, round_=round_, slot=slot)
+    except orders.OrderError as e:
+        raise SessionError(f"work order{'' if round_ is None else f' for round {round_}'}: {e}") from None
+
+
+def _harness(adapter, flags, cwd) -> tuple:
+    """The harness named by `adapter` (default pyperf), its complete precision
+    from `flags` over its defaults, and the config file it read (or None).
+    A flag the harness does not take is refused here, before any side is resolved."""
+    harness = harnesses.get(adapter) if adapter else HARNESS
+    precision, config_path = harness.precision(harness.flags_to_precision(**(flags or {})), start=cwd)
+    return harness, precision, config_path
+
+
+def _source_uri(sides, source_uri) -> str:
+    """The one URI the sides' source is known by; SessionError if they disagree."""
+    if source_uri:
+        uris = {normalize_remote(source_uri)}
+    else:
+        uris = {normalize_remote(side["uri"], base=side["source"]) if side["uri"] else snapshot.source_uri(side["source"])
+                for side in sides}
+    if len(uris) != 1:
+        raise SessionError(f"the sides report different source URIs {sorted(uris)}; pass --source-uri")
+    return uris.pop()
+
+
+def _run_side(side: dict, path: Path, store=None, **order) -> tuple[dict, dict | None]:
+    """Write one side's order to `path`, run it (results go beside `orders/`),
+    and deliver them to `store` unless it is None. The runner's summary, and the
+    store's outcome (None without a store)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(_order(side, **order), indent=1) + "\n")
+    summary = runner.run(path, path.parent.parent)
+    return summary, store.ingest_paths(summary["files"]) if store else None
+
+
+def bench_target(target: str, *, suite: str, store=None, adapter=None, flags=None, environment_variables=None,
+                 filter=None, quantity="wall-time", project=None, run_key=None, out=None, source_uri=None,
+                 case_s=orders.CASE_TIMEOUT_S, order_s=orders.ORDER_TIMEOUT_S, progress=None, build=True,
+                 cwd=".") -> dict:
+    """Run one target once: a comparison session of one order, with no round,
+    slot or comparison. Results are delivered to `store` unless it is None.
+
+    `target` is `@CONFIG[=SOURCE_REF]` or a bare path, which the harness reads
+    (see `_side`); `adapter`, `flags` and the rest are as for `compare_targets`.
+    Returns the runner's summary, with the store's `outcome`, the `precision`
+    and the `config` file (or None) it came from. Raises SessionError when the
+    run cannot start, and runner.Refused when the runner refuses the order.
+    """
+    harness, precision, config_path = _harness(adapter, flags, cwd)
+    side = _side(target, suite, "prepare" if build else "describe", harness, environment_variables)
+    source_uri = _source_uri([side], source_uri)
+    run_key = run_key or orders.default_run_key("bench")
+    out = Path(out) if out else Path("results") / run_key.replace("/", "_")
+    if progress:
+        progress(f"precision: {harness.describe_precision(precision, config_path)}")
+    summary, outcome = _run_side(side, out / "orders" / "order.json", store, harness=harness, suite=suite,
+                                 filter=filter, quantity=quantity, precision=precision,
+                                 environment_variables=environment_variables, project=project, run_key=run_key,
+                                 source_uri=source_uri, case_s=case_s, order_s=order_s)
+    return {**summary, "outcome": outcome, "precision": precision, "config": config_path}
 
 
 def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, rounds: int, store,
-                    filter=None, quantity="wall-time", repetitions=5, min_time=None, project=None,
-                    label=None, run_key=None, out=None, source_uri=None, k=3.0, min_rounds=3,
-                    progress=None, build=True) -> dict:
+                    adapter=None, flags=None, environment_variables=None, filter=None, quantity="wall-time",
+                    project=None, label=None, run_key=None, out=None, source_uri=None, k=3.0, min_rounds=3,
+                    progress=None, build=True, cwd=".") -> dict:
     """Alternate baseline and contender over `rounds` rounds, deliver every
     result to `store`, and return the run-mode comparison document.
 
     `baseline` and `contender` are `BUILD_DIR[:SOURCE_DIR]` or `@CONFIG[=SOURCE_REF]`;
     a provider is asked to `prepare` (it may build) unless `build` is false, when
     it is only asked to `describe`. For `environments`,
-    `label` is (name, baseline value, contender value). Raises SessionError when
-    the session cannot start, and runner.Refused when the runner refuses an order.
+    `label` is (name, baseline value, contender value).
+
+    `adapter` names the harness (default pyperf); `flags` are its
+    precision flags by keyword (`harnesses.Harness.FLAGS`), over its defaults
+    and, for pyperf, the config file found from `cwd`. `environment_variables`
+    are set for both sides alike, and so become workload parameters of both.
+    Raises SessionError when the session cannot start, and runner.Refused when
+    the runner refuses an order.
     """
     if profile not in PROFILES:
         raise SessionError(f"profile {profile!r} is not in the prototype ({', '.join(PROFILES)})")
@@ -150,38 +201,29 @@ def compare_targets(baseline: str, contender: str, *, profile: str, suite: str, 
         raise SessionError("the environments profile needs --label NAME=BASE,CONTENDER")
     if profile == "revisions" and label is not None:
         raise SessionError("--label names the sides of an environments comparison; revisions are named by their trees")
+    harness, precision, _ = _harness(adapter, flags, cwd)
     operation = "prepare" if build else "describe"
-    sides = [_side(baseline, suite, operation), _side(contender, suite, operation)]
+    sides = [_side(spec, suite, operation, harness, environment_variables) for spec in (baseline, contender)]
     if profile == "revisions":
         # UC-03 §10: refuse before any measurement, not after R rounds.
         for name, side in zip(("baseline", "contender"), sides):
             if side["identity"]["dirty"] != "clean":
                 raise SessionError(f"{name} tree {side['source']} is {side['identity']['dirty']}; "
                                    "a revisions comparison needs clean trees (UC-03 §10)")
-    if source_uri:
-        uris = {normalize_remote(source_uri)}
-    else:
-        uris = {normalize_remote(side["uri"], base=side["source"]) if side["uri"] else _source_uri(side["source"])
-                for side in sides}
-    if len(uris) != 1:
-        raise SessionError(f"the sides report different source URIs {sorted(uris)}; pass --source-uri")
-    source_uri = uris.pop()
+    source_uri = _source_uri(sides, source_uri)
 
-    run_key = run_key or "compare-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    run_key = run_key or orders.default_run_key("compare")
     out = Path(out) if out else Path("results") / run_key.replace("/", "_")
-    (out / "orders").mkdir(parents=True, exist_ok=True)
     labels = [{label[0]: label[1]}, {label[0]: label[2]}] if label else [None, None]
 
     slot = 0
     for round_ in range(rounds):
         for name, side, side_labels in zip(("baseline", "contender"), sides, labels):
-            order = _order(side, suite=suite, filter=filter, quantity=quantity, repetitions=repetitions,
-                           min_time=min_time, project=project, run_key=run_key, source_uri=source_uri,
-                           round_=round_, slot=slot, labels=side_labels)
-            path = out / "orders" / f"order-{slot:04d}.json"
-            path.write_text(json.dumps(order, indent=1) + "\n")
-            summary = runner.run(path, out)
-            outcome = store.ingest_paths(summary["files"])
+            summary, outcome = _run_side(side, out / "orders" / f"order-{slot:04d}.json", store,
+                                         harness=harness, suite=suite, filter=filter, quantity=quantity,
+                                         precision=precision, environment_variables=environment_variables,
+                                         project=project, run_key=run_key, source_uri=source_uri,
+                                         round_=round_, slot=slot, labels=side_labels)
             if outcome["rejected"]:
                 codes = sorted({r["code"] for r in outcome["rejected"]})
                 raise SessionError(f"the store rejected results of round {round_} ({name}): {', '.join(codes)}")

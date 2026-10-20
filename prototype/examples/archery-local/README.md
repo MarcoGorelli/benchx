@@ -108,7 +108,7 @@ $ bx target describe _work/build-hardened         # a bare directory: its own si
 
 # the story's own knobs: scope by filter, precision by repetitions
 $ bx compare @plain @hardened --profile environments --label build=plain,hardened \
-      --suite demo-bench --filter BM_Quiet --rounds 10 --repetitions 5 \
+      --adapter google-benchmark --suite demo-bench --filter BM_Quiet --rounds 10 --repetitions 5 \
       --project archery-local --run-key mine
 
 $ bx compare --run mine --profile environments --label build --baseline plain   # read mode

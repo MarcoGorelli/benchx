@@ -83,7 +83,7 @@ build "$WORK/wt-head" "$WORK/build-hardened" -DDEMO_HARDENED=ON
 step "revisions, ad hoc: no project, measured and compared in one command"
 echo "# measure mode: the sides alternate over $ROUNDS rounds, one work order each"
 bx compare "$WORK/build-base:$WORK/wt-base" "$WORK/build-head:$WORK/wt-head" --profile revisions \
-  --suite demo-bench --rounds "$ROUNDS" --run-key "$RUN_REV" --out "$WORK/results-rev"
+  --adapter google-benchmark --suite demo-bench --rounds "$ROUNDS" --run-key "$RUN_REV" --out "$WORK/results-rev"
 echo "# the first work order it wrote:"
 show cat "$WORK/results-rev/orders/order-0000.json"
 echo
@@ -93,7 +93,7 @@ echo "# bx compare also delivered these to the local store, as thin results of p
 
 step "environments, tracked: project demo, into the local store"
 bx compare "$WORK/build-head:$WORK/wt-head" "$WORK/build-hardened:$WORK/wt-head" --profile environments \
-  --label build=plain,hardened --suite demo-bench --rounds "$ROUNDS" --project demo \
+  --label build=plain,hardened --adapter google-benchmark --suite demo-bench --rounds "$ROUNDS" --project demo \
   --run-key "$RUN_ENV" --out "$WORK/results-env"
 
 step "re-ingest is a visible no-op"

@@ -9,7 +9,7 @@ import pytest
 from benchx import compare, core, identity, runner
 from benchx.core.errors import StructureError
 from benchx.store import Store
-from conftest import NOISY, QUIET, SOURCE_URI, cases, make_build, order, run_rounds
+from conftest import NOISY, QUIET, SOURCE_URI, cases, git, make_build, order, run_rounds
 
 
 def load(path: Path) -> dict:
@@ -491,3 +491,18 @@ def test_working_tree_outside_git_falls_back_to_a_directory_hash(tmp):
         assert doc["revision"]["key"] == f"directory-{tree}"
     (plain / "mod.py").write_text("x = 2\n")
     assert runner.snapshot.directory_identity(plain)["tree"] != tree  # content, not time, identifies it
+
+
+def test_git_identity_ignores_pycache_folders(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    git(src, "init", "-q")
+    (src / "mod.py").write_text("x = 1\n")
+    git(src, "add", "-A")
+    git(src, "commit", "-qm", "one")
+    before = runner.snapshot.git_identity(src)
+    for folder in (src / "__pycache__", src / "pkg" / "sub" / "__pycache__"):
+        folder.mkdir(parents=True)
+        (folder / "mod.cpython-312.pyc").write_bytes(b"\0")
+    assert runner.snapshot.git_identity(src) == before
+    assert before["dirty"] == "clean"
