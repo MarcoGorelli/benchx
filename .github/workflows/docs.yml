@@ -47,9 +47,6 @@ jobs:
         with:
           path: site
 
-  # Deploys from the same repository; no deploy token or site repository is
-  # needed. configure-pages turns Pages on (source "GitHub Actions") the first
-  # time, so nothing has to be set up by hand.
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: build
@@ -62,8 +59,6 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       - id: deployment
         uses: actions/deploy-pages@v4
