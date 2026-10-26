@@ -30,7 +30,7 @@ between calls outside the timed region: every call sees freshly set-up state
 
 Translating: pyperf's JSON as the pyperf adapter reads it; parameter values
 are kept as asv's repr() strings; asv's `version` (the same hash asv computes)
-is part of comparison context, so editing a benchmark starts a new series.
+is part of the protocol, so editing a benchmark starts a new series.
 """
 
 import itertools
@@ -368,7 +368,7 @@ def run_case(runnable, case, invocation, env, timeout, native_path, env_names=No
             "worker_env": _read_json(worker_env), "passed_env_digest": pyperf.env_digest(env)}
 
 
-def _case_applied(applied: dict, plan: dict) -> dict:
+def _case_applied(applied: dict, plan: dict, version: str | None = None) -> dict:
     """The protocol one case ran under, in benchx terms."""
     if plan["loops"] is not None:
         calibration = {"mode": "fixed", "n_iterations": plan["loops"]}
@@ -376,13 +376,16 @@ def _case_applied(applied: dict, plan: dict) -> dict:
         calibration = {"mode": "adaptive", "minimum_sample_seconds": plan["min_time"]}
     warmup = {"mode": "count", "n_warmup": plan["warmups"]} if plan["warmups"] else {"mode": "none"}
     asv = {k: plan[k] for k in ("values_from", "timeout", "setup_per_call")}
+    if version:
+        asv["benchmark_version"] = version
     return {**applied, "repetitions": {"mode": "fixed", "levels": [{"unit": "process", "n": plan["processes"]},
                                                                    {"unit": "value", "n": plan["values"]}]},
             "calibration": calibration, "warmup": warmup, "asv": asv}
 
 
 def case_protocol(applied: dict, run: dict, case: str) -> dict:
-    return _case_applied(applied, run["native"]["benchx_asv"]["plan"])
+    asv = run["native"]["benchx_asv"]
+    return _case_applied(applied, asv["plan"], asv["benchmark"].get("version"))
 
 
 def attempted(applied: dict) -> int:
@@ -413,21 +416,15 @@ def harness(info: dict) -> dict:
     return pyperf.harness(info)
 
 
-def comparison_extras(info: dict) -> dict:
-    """Host runtime, and asv's `version` of the benchmark code (§6.7: benchmark identity)."""
-    extras = pyperf.comparison_extras(info)
-    if info.get("benchmark_version"):
-        extras["benchmark_version"] = info["benchmark_version"]
-    return extras
-
-
 def context_facts(native: dict | None) -> tuple[dict, dict]:
-    """pyperf's facts, the installed project the workers saw, and the benchmark's declared attributes."""
+    """pyperf's facts; in provenance, the installed project the workers saw (it
+    changes with the revision, so it is never a system fact) and the benchmark's
+    declared attributes. The benchmark's `version` is in its protocol (`case_protocol`)."""
     native = native or {}
-    observed, info = pyperf.context_facts(native)
+    system, info = pyperf.context_facts(native)
     asv = native.get("benchx_asv", {})
     if asv.get("project"):
-        observed["project"] = asv["project"]
+        info["installed"] = asv["project"]
     benchmark = asv.get("benchmark")
     if benchmark:
         if benchmark.get("version"):
@@ -436,7 +433,7 @@ def context_facts(native: dict | None) -> tuple[dict, dict]:
             info["declared"] = benchmark["declared"]
         if benchmark.get("setup_cache_key"):
             info["setup_cache_key"] = benchmark["setup_cache_key"]
-    return observed, info
+    return system, info
 
 
 def observed_environment(run: dict, case: str, env_names) -> tuple[dict, list[str]]:

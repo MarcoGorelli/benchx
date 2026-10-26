@@ -10,7 +10,7 @@ bx run <order.json> [--out DIR] [--no-ingest]
 bx ingest <dir|file>                     # result files and work orders → the local store
 bx series [--workload … --quantity …]    # list series
 bx history <series>                      # one series' points (a query)
-bx head [-n 10] [--json]                 # the latest results in the store, newest first
+bx head [-n 10] [--project P] [--workload W] [--json|--table]  # the latest results, newest first
 bx compare --run KEY --profile revisions|environments --baseline VALUE
            [--label NAME] [--results DIR] [--k 3] [--json]
                                          # read mode: compare results already measured
@@ -97,8 +97,8 @@ levels (`--rounds` → processes, `--repeat` → values, `--number` → loops,
 benchmark's own `repeat`, `number`, `sample_time`, `warmup_time` and `timeout`, then
 asv's defaults, and each result records its own case's protocol. The harness in
 every result is pyperf. Results also record the installed project's version
-(`observed_context.asv.project`) and asv's hash of the benchmark's code
-(`comparison_context.benchmark_version`).
+(`provenance.info.asv.installed`) and asv's hash of the benchmark's code
+(`protocol.asv.benchmark_version`), so editing a benchmark starts a new series.
 
 ## What it does
 
@@ -108,10 +108,12 @@ every result is pyperf. Results also record the installed project's version
   One order is one side of one round; measure mode alternates them.
 - **The runner** (`bx run`) validates the order, refuses what it cannot apply
   exactly, runs each planned case in its own process, writes one result file
-  per attempt × quantity, and delivers those files to the local store
+  per attempt × quantity, plus a `load-average` condition measurement per
+  attempt (schema §4.4), and delivers those files to the local store
   (`--no-ingest` to skip). Each result is valid against the result schema on `main`
   (`schemas/measurement-result/0.1.0`). It records the
-  zero-configuration snapshot (`machine/v1` identity, OS, kernel, load,
+  zero-configuration snapshot (`machine/v1` identity, and under
+  `environment.system` the architecture, OS, kernel, C library, governor, and the
   allowlisted thread and loader variables, extensible with `$BENCHX_ENV_ALLOWLIST`), the source's revision, dirty state, and tree
   id, the build configuration from `CMakeCache.txt`, and declared facts from
   `.benchx/setup.json`. It changes nothing on the machine and builds nothing,
@@ -124,7 +126,9 @@ every result is pyperf. Results also record the installed project's version
   `attempt-conflict`. Each result is one row: the columns #30 derives from the
   schema, the store's derived columns, the canonical document, and the work
   order it references. Entities and series are computed from the rows on
-  query. Every accepting ingest rewrites the file atomically.
+  query, under the identity policy in `benchx/identity.py`: the default of
+  `schemas/identity-policy/0.1.0` with the benchmark's revision ignored.
+  Every accepting ingest rewrites the file atomically.
 - **The session loop** (`benchx/session.py`, `bx compare` in measure mode) is
   the workbench's part: it checks both targets (and, for `revisions`, that both
   trees are clean, before running anything), writes one order per side and
@@ -132,20 +136,23 @@ every result is pyperf. Results also record the installed project's version
   store, and hands the run to the comparator. It builds nothing: both build
   directories must already exist.
 - **The comparator** (`bx compare --run`) runs in run mode for the `revisions` and
-  `environments` profiles: it checks the profile's invariants (`revisions` also
+  `environments` profiles, each a projection built in code from the identity
+  policy (`benchx/compare.py`): the axis tells the sides apart, everything the
+  policy matches must agree, and it checks the profile's invariants (`revisions` also
   requires clean trees, UC-03 §10; `environments` labels a dirty side
   local-only), pairs the
   sides by round, and applies `benchx/paired-relative/v1` (effect = mean
   relative paired difference, noise = its standard error, change when
   |effect| > *k* × noise). `environments` names its sides by the label
   `--label` gives. `--results` compares result files through a throwaway
-  store: the ad hoc path. Deterministic quantities are deferred.
+  store: the ad hoc path. Condition measurements (`measurement.kind:
+  condition`) are not compared, and deterministic quantities are deferred.
 
 ## Run it
 
 ```console
 $ uv venv && uv pip install -e '.[test]'   # editable: schemas are read from ../schemas
-$ .venv/bin/python -m pytest tests     # 316 tests, fake Google Benchmark binary, no compiler
+$ .venv/bin/python -m pytest tests     # 343 tests, fake Google Benchmark binary, no compiler
 $ ./demo.sh                             # real builds; needs cmake, a C++ compiler, network once
 ```
 
@@ -201,10 +208,11 @@ benchx/
   runner.py          one work order in, results out
   session.py         the session loop: alternate two targets over rounds, then compare
   target.py          target descriptions: the provider call, the sidecar, the declared text
-  identity.py        fingerprints, identity policy, series points (schema §4.3, §4.5)
+  projection.py      projections: roles plus an axis, the identity policy the default one (schema §4.3)
+  identity.py        the identity policy and series points (schema §4.3, §4.5)
   parquet.py         the store's row: #30's columns plus derived ones
   store.py           the single-file Parquet store and the ingest contract (schema §5.4)
-  compare.py         run mode, profiles, comparison document (comparator.md)
+  compare.py         run mode over a profile's projection, comparison document (comparator.md)
   cli.py             bx (compare has a read mode and a measure mode)
 ../schemas/          the result and work-order schemas, read in place ($BENCHX_SCHEMAS overrides)
 examples/demo-suite  a two-benchmark Google Benchmark suite for the demo

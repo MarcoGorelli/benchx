@@ -44,24 +44,17 @@
         "distribution": "wheel"
       }
     },
-    "quantity": {
-      "name": "cpu-time",
-      "unit": "s"
-    },
-    "comparison_context": {
-      "python": "3.12",
-      "protocol": {
-        "name": "cupyx-profiler-benchmark",
-        "version": "v1",
-        "timer": "perf_counter",
-        "warmup": {
-          "mode": "repetitions",
-          "n_warmup": 3
-        },
-        "repetitions": {
-          "mode": "fixed",
-          "n_repeat": 10
-        }
+    "protocol": {
+      "name": "cupyx-profiler-benchmark",
+      "version": "v1",
+      "timer": "perf_counter",
+      "warmup": {
+        "mode": "repetitions",
+        "n_warmup": 3
+      },
+      "repetitions": {
+        "mode": "fixed",
+        "n_repeat": 10
       }
     },
     "environment": {
@@ -73,6 +66,17 @@
           "NVIDIA H100 80GB HBM3",
           "NVIDIA H100 80GB HBM3"
         ]
+      },
+      "system": {
+        "os": {
+          "kernel": "6.8.0-45-generic"
+        },
+        "gpu": {
+          "driver": "550.90.07"
+        },
+        "runtime": {
+          "python": "3.12"
+        }
       }
     },
     "resource_selection": {
@@ -81,6 +85,10 @@
     }
   },
   "measurement": {
+    "quantity": {
+      "name": "cpu-time",
+      "unit": "s"
+    },
     "status": "success",
     "observations": [
       {
@@ -143,11 +151,6 @@
         "source": "producer"
       }
     ]
-  },
-  "observed_context": {
-    "kernel": "6.8.0-45-generic",
-    "nvidia_driver": "550.90.07",
-    "gpu_clock_mhz": 1980
   },
   "procedure": {
     "attempted_repetitions": 10,

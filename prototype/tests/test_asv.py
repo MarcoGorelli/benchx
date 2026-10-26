@@ -87,7 +87,8 @@ def results(root, run_key):
     return {(d["coordinates"]["workload"]["name"], json.dumps(d["coordinates"]["workload"].get("parameters", {}),
                                                               sort_keys=True)): d
             for d in (json.loads(p.read_text()) for p in (root / "results" / run_key).glob("*.json"))
-            if not d.get("schema_version") == "benchx/work-order/0.1.0"}
+            if not d.get("schema_version") == "benchx/work-order/0.1.0"
+            and d["measurement"].get("kind") != "condition"}  # the runner's load-average siblings
 
 
 def test_flags_become_precision_and_overrides():
@@ -127,25 +128,24 @@ def test_asv_command_runs_every_time_benchmark(suite, capsys):
     assert one["measurement"]["status"] == "success"
     assert len(one["measurement"]["observations"]) == 4
     assert {o["group"] for o in one["measurement"]["observations"]} == {"0", "1"}
-    context = one["coordinates"]["comparison_context"]
-    assert context["harness"]["name"] == "pyperf"
-    protocol = context["protocol"]
+    protocol = one["coordinates"]["protocol"]
+    assert protocol["harness"]["name"] == "pyperf"
     # The order's --repeat wins; the benchmark's own `number = 3` applies.
     assert protocol["calibration"] == {"mode": "fixed", "n_iterations": 3}
     assert protocol["repetitions"]["levels"] == [{"unit": "process", "n": 2}, {"unit": "value", "n": 2}]
     assert protocol["warmup"] == {"mode": "none"}
     assert one["procedure"]["inner_iterations"] == 3
-    assert context["benchmark_version"]
-    assert one["observed_context"]["asv"]["project"]["name"] == "json"
+    assert protocol["asv"]["benchmark_version"]
+    assert one["provenance"]["info"]["asv"]["installed"]["name"] == "json"
     assert "env-mismatch" not in one.get("quality", {}).get("warnings", [])
     # setup_cache ran, and its value reached the benchmark.
     assert found[("bm.Cached.time_sum", "{}")]["measurement"]["status"] == "success"
     assert found[("bm.time_plain", "{}")]["measurement"]["status"] == "success"
-    assert found[("bm.Skipped.time_skipped", "{}")]["measurement"] == {"status": "skipped",
-                                                                       "reason": "harness.skipped"}
+    skipped = found[("bm.Skipped.time_skipped", "{}")]["measurement"]
+    assert (skipped["status"], skipped["reason"]) == ("skipped", "harness.skipped")
     assert found[("bm.Mutating.time_pop", "{}")]["measurement"]["status"] == "success"
     broken = found[("bm.time_broken", "{}")]
-    assert broken["measurement"] == {"status": "error", "reason": "harness.error"}
+    assert (broken["measurement"]["status"], broken["measurement"]["reason"]) == ("error", "harness.error")
     assert "boom" in broken["provenance"]["info"]["message"]
     assert not any("peakmem" in name for name, _ in found)
     assert {d["coordinates"]["workload"]["name"] for d in Store().documents("all")} >= {"bm.time_plain"}
@@ -157,12 +157,13 @@ def test_filter_and_benchmark_defaults(suite, capsys):
     found = results(suite, "one")
     assert list(found) == [("bm.time_plain", "{}")]
     document = found[("bm.time_plain", "{}")]
-    protocol = document["coordinates"]["comparison_context"]["protocol"]
+    protocol = document["coordinates"]["protocol"]
     # Nothing overridden: asv's defaults where pyperf can take them.
     assert protocol["calibration"] == {"mode": "adaptive", "minimum_sample_seconds": 0.01}
     assert protocol["warmup"] == {"mode": "count", "n_warmup": 1}
     assert protocol["repetitions"]["levels"] == [{"unit": "process", "n": 1}, {"unit": "value", "n": 5}]
-    assert protocol["asv"] == {"values_from": "default", "timeout": 60.0, "setup_per_call": False}
+    assert {k: v for k, v in protocol["asv"].items() if k != "benchmark_version"} == {
+        "values_from": "default", "timeout": 60.0, "setup_per_call": False}
     assert len(document["measurement"]["observations"]) == 5
     assert "1 rounds x per-benchmark repeat" in capsys.readouterr().err
 
@@ -188,7 +189,7 @@ def test_setup_means_one_call_per_loop(suite):
     assert cli.main(["asv", "-b", r"WithSetup\.time_sum$", "--run-key", "c", "--no-ingest",
                      "--rounds", "1"]) == cli.EXIT_OK
     (document,) = results(suite, "c").values()
-    protocol = document["coordinates"]["comparison_context"]["protocol"]
+    protocol = document["coordinates"]["protocol"]
     assert protocol["calibration"] == {"mode": "fixed", "n_iterations": 1}
     assert protocol["asv"]["setup_per_call"] is True
     assert document["procedure"]["inner_iterations"] == 1
@@ -200,7 +201,8 @@ def test_setup_and_teardown_run_between_calls(suite, tmp):
     out = tmp / "m"
     assert cli.main(["asv", "-b", r"Mutating", "--run-key", "m", "--no-ingest", "--out", str(out),
                      "--rounds", "1", "--repeat", "2", "--warmups", "0"]) == cli.EXIT_OK
-    (document,) = (json.loads(p.read_text()) for p in out.glob("*.json") if "workorder" not in p.name)
+    (document,) = (d for d in (json.loads(p.read_text()) for p in out.glob("*.json") if "workorder" not in p.name)
+                   if d["measurement"].get("kind") != "condition")
     assert document["measurement"]["status"] == "success"
     assert document["procedure"]["inner_iterations"] == 3
 
@@ -212,7 +214,7 @@ def test_timeout_is_the_benchmarks_own(suite):
     assert cli.main(["asv", "-b", r"Slow", "--run-key", "t", "--no-ingest", "--rounds", "1",
                      "--repeat", "1", "--warmups", "0", "--number", "1"]) == cli.EXIT_OK
     (document,) = results(suite, "t").values()
-    assert document["measurement"] == {"status": "error", "reason": "timeout"}
+    assert (document["measurement"]["status"], document["measurement"]["reason"]) == ("error", "timeout")
 
 
 def test_discovery_agrees_with_asv_runner(suite):
