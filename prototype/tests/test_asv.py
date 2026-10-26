@@ -197,7 +197,7 @@ def test_env_var_named_like_a_parameter_is_refused(suite, capsys):
 
 
 def test_setup_means_one_call_per_loop(suite):
-    # asv#966: a benchmark with a setup and no declared number is timed one call per value.
+    # As asv_runner >= 0.3.1 (asv#966, asv_runner#53): a benchmark with a setup and no number is timed one call per value.
     assert cli.main([*ASV, "--filter", r"WithSetup\.time_sum$", "--run-key", "c", "--no-ingest",
                      "--processes", "1"]) == cli.EXIT_OK
     (document,) = results(suite, "c").values()
