@@ -55,7 +55,7 @@ SUITE = textwrap.dedent('''
         raise ValueError("boom")
 
     class Mutating:
-        number = 3
+        number = 1
 
         def setup(self):
             self.data = [1]
@@ -168,7 +168,7 @@ def test_filter_and_benchmark_defaults(suite, capsys):
     assert protocol["warmup"] == {"mode": "count", "n_warmup": 1}
     assert protocol["repetitions"]["levels"] == [{"unit": "process", "n": 1}, {"unit": "value", "n": 5}]
     assert {k: v for k, v in protocol["asv"].items() if k != "benchmark_version"} == {
-        "values_from": "default", "timeout": 60.0, "setup_per_call": False}
+        "values_from": "default", "timeout": 60.0}
     assert len(document["measurement"]["observations"]) == 5
     assert "1 rounds x per-benchmark repeat" in capsys.readouterr().err
 
@@ -196,27 +196,27 @@ def test_env_var_named_like_a_parameter_is_refused(suite, capsys):
     assert results(suite, "clash") == {}
 
 
-def test_setup_means_one_call_per_loop(suite):
-    # asv#966: a benchmark with a setup and no declared number is timed one call per value.
+def test_setup_does_not_stop_calibration(suite):
+    # As in asv, setup runs once per value, so a benchmark with one is still calibrated to many loops.
     assert cli.main([*ASV, "--filter", r"WithSetup\.time_sum$", "--run-key", "c", "--no-ingest",
                      "--processes", "1"]) == cli.EXIT_OK
     (document,) = results(suite, "c").values()
     protocol = document["coordinates"]["protocol"]
-    assert protocol["calibration"] == {"mode": "fixed", "n_iterations": 1}
-    assert protocol["asv"]["setup_per_call"] is True
-    assert document["procedure"]["inner_iterations"] == 1
+    assert protocol["calibration"] == {"mode": "adaptive", "minimum_sample_seconds": 0.01}
+    assert document["procedure"]["inner_iterations"] > 1
 
 
-def test_setup_and_teardown_run_between_calls(suite, tmp):
-    # number = 3: each of the three calls of a value gets its own setup; the
-    # pop would fail on the second otherwise. Teardown runs before each re-setup and at the end.
+def test_setup_and_teardown_run_between_values(suite, tmp):
+    # number = 1: each value is one call with its own setup; the pop would
+    # fail on the second value otherwise. Teardown runs before each re-setup and at the end.
     out = tmp / "m"
     assert cli.main([*ASV, "--filter", r"Mutating", "--run-key", "m", "--no-ingest", "--out", str(out),
-                     "--processes", "1", "--values", "2", "--warmups", "0"]) == cli.EXIT_OK
+                     "--processes", "1", "--values", "3", "--warmups", "1"]) == cli.EXIT_OK
     (document,) = (d for d in (json.loads(p.read_text()) for p in out.glob("*.json") if "workorder" not in p.name)
                    if d["measurement"].get("kind") != "condition")
     assert document["measurement"]["status"] == "success"
-    assert document["procedure"]["inner_iterations"] == 3
+    assert document["procedure"]["inner_iterations"] == 1
+    assert len(document["measurement"]["observations"]) == 3
 
 
 def test_timeout_is_the_benchmarks_own(suite):

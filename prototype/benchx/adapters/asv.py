@@ -23,10 +23,10 @@ read (the order always gives processes); `repeat` gives values (a `(min, max,
 seconds)` repeat gives its minimum: pyperf takes a fixed number); `number`
 gives fixed loops; `sample_time` gives pyperf's `--min-time`; `warmup_time = 0`
 means no warmup, any other a single warmup value; `timeout` is pyperf's
-per-worker `--timeout`, rounded up to whole seconds (asv's default 60 s). A benchmark with setup hooks and
-no `number` is timed one call per loop, and with a `number`, setup runs again
-between calls outside the timed region: every call sees freshly set-up state
-(asv#966). Each result reports its own case's protocol (`case_protocol`).
+per-worker `--timeout`, rounded up to whole seconds (asv's default 60 s). As in
+asv, setup runs once per value, outside the timed region, and the loops of a
+value share its state; `number = 1` gives every call fresh state. Each result
+reports its own case's protocol (`case_protocol`).
 
 Translating: pyperf's JSON as the pyperf adapter reads it; parameter values
 are kept as asv's repr() strings; asv's `version` (the same hash asv computes)
@@ -52,7 +52,7 @@ from .base import Unsupported
 NAME = "asv"
 CONTEXT_KEY = "asv"
 WORKLOAD_PARAMETERS = False
-PRODUCER = {"name": "benchx/asv-adapter", "version": "0.2.0", "mapping_version": "asv-on-pyperf/v1"}
+PRODUCER = {"name": "benchx/asv-adapter", "version": "0.2.0", "mapping_version": "asv-on-pyperf/v2"}
 QUANTITIES = pyperf.QUANTITIES
 ENV_ALLOWLIST = pyperf.ENV_ALLOWLIST
 
@@ -226,16 +226,13 @@ def _plan(info: dict, invocation: dict) -> dict:
     loops = invocation["loops"]
     if loops is None and int(declared.get("number", 0)) > 0:
         loops = int(declared["number"])
-    if loops is None and info["has_setup"]:
-        loops = 1  # asv#966: setup hooks mean each timed call sees fresh state
     min_time = invocation["min_time"] if invocation["min_time"] is not None else declared.get(
         "sample_time", DEFAULT_SAMPLE_TIME)
     warmups = invocation["warmups"]
     if warmups is None:
         warmups = 0 if declared.get("warmup_time") == 0 else 1
     return {"processes": invocation["processes"], "values": values, "values_from": source, "loops": loops,
-            "min_time": min_time, "warmups": warmups, "timeout": float(declared.get("timeout", DEFAULT_TIMEOUT)),
-            "setup_per_call": info["has_setup"]}
+            "min_time": min_time, "warmups": warmups, "timeout": float(declared.get("timeout", DEFAULT_TIMEOUT))}
 
 
 def _flags(plan: dict) -> list[str]:
@@ -375,7 +372,7 @@ def _case_applied(applied: dict, plan: dict, version: str | None = None) -> dict
     else:
         calibration = {"mode": "adaptive", "minimum_sample_seconds": plan["min_time"]}
     warmup = {"mode": "count", "n_warmup": plan["warmups"]} if plan["warmups"] else {"mode": "none"}
-    asv = {k: plan[k] for k in ("values_from", "timeout", "setup_per_call")}
+    asv = {k: plan[k] for k in ("values_from", "timeout")}
     if version:
         asv["benchmark_version"] = version
     return {**applied, "repetitions": {"mode": "fixed", "levels": [{"unit": "process", "n": plan["processes"]},

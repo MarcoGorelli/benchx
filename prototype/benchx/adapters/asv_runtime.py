@@ -217,43 +217,28 @@ class Benchmark:
 
     def time_func(self):
         """pyperf's time_func(loops): seconds for `loops` calls, the collector off as
-        under asv. With setup hooks, every call sees freshly set-up state (asv#966):
-        teardown and setup run between calls, outside the timed region."""
+        under asv. As in asv, setup runs once per value (asv's sample), outside the
+        timed region, and the calls within a value share its state; a benchmark that
+        needs fresh state for every call declares `number = 1`."""
         func, args, timer = self.func, self._args(), self.timer
-        if not self.setups:
-            def run(loops):
-                enabled = gc.isenabled()
-                gc.disable()
-                try:
-                    start = timer()
-                    for _ in range(loops):
-                        func(*args)
-                    return timer() - start
-                finally:
-                    if enabled:
-                        gc.enable()
-            return run
+        fresh = [True]  # the first value uses the setup the driver ran
 
-        fresh = [True]  # the first call uses the setup the driver ran
-
-        def run_isolated(loops):
+        def run(loops):
+            if not fresh[0]:
+                self.teardown()
+                self.setup()
+            fresh[0] = False
             enabled = gc.isenabled()
             gc.disable()
-            total = 0.0
             try:
+                start = timer()
                 for _ in range(loops):
-                    if not fresh[0]:
-                        self.teardown()
-                        self.setup()
-                    fresh[0] = False
-                    start = timer()
                     func(*args)
-                    total += timer() - start
+                return timer() - start
             finally:
                 if enabled:
                     gc.enable()
-            return total
-        return run_isolated
+        return run
 
 
 def _benchmark(attr_name, module, klass, func):
