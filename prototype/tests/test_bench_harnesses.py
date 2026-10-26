@@ -101,7 +101,7 @@ def test_precision_and_quantity_are_the_harnesss(build, tmp):
     (["BUILD", "--suite", "mod.py", "--repetitions", "3"], "pyperf takes no --repetitions"),  # the default
     (["BUILD", *GBENCH, "--filter", "Quiet", QUIET], "case names or --filter"),
     (["BUILD", *GBENCH, "--tree", "t"], "--tree belongs to"),
-    (["BUILD", "--adapter", "google-benchmark"], "give --suite, or a Python file"),
+    (["BUILD", "--adapter", "google-benchmark"], "give --suite, a Python file"),
     (["m.py", "--adapter", "google-benchmark"], "benchmarked with pyperf"),
 ])
 def test_what_does_not_fit_is_refused_before_anything_runs(argv, message, build, tmp, capsys):

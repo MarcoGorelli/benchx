@@ -4,8 +4,8 @@
 resolves the target and builds the order the way a comparison session does
 (no round, no slot, no comparison). What is left here is the shorthand
 `bx bench MODULE.py [FUNCTION ...]`, which names a Python module's checkout as
-the target and the module's path in it as the suite, and the table that
-summarizes the results.
+the target and the module's path in it as the suite, its asv counterpart
+`bx bench PATH --adapter asv`, and the table that summarizes the results.
 """
 
 import json
@@ -36,6 +36,26 @@ def module_target(module, tree=None) -> tuple[str, str]:
         raise SessionError(f"{module} is not inside the tree {root}; give --tree") from None
 
 
+def asv_target(path, tree=None) -> tuple[str, str]:
+    """The asv shorthand's target and suite. `path` is a directory holding
+    asv.conf.json (its `benchmark_dir`, default `benchmarks`, is the suite) or the
+    benchmark directory itself; the target is its tree, as for a module."""
+    from .adapters import asv
+    benchmark_dir = Path(path).resolve()
+    for name in asv.CONF_NAMES:
+        if (benchmark_dir / name).is_file():
+            conf = asv._read_conf(benchmark_dir / name)
+            benchmark_dir = (benchmark_dir / conf.get("benchmark_dir", "benchmarks")).resolve()
+            break
+    if not benchmark_dir.is_dir():
+        raise SessionError(f"no such benchmark directory: {benchmark_dir}")
+    root = tree_of(benchmark_dir, tree)
+    try:
+        return str(root), benchmark_dir.relative_to(root).as_posix()
+    except ValueError:
+        raise SessionError(f"{benchmark_dir} is not inside the tree {root}; give --tree") from None
+
+
 def summarize(files) -> list[dict]:
     """One row per result document among `files`."""
     rows = []
@@ -54,8 +74,10 @@ def row_of(document: dict) -> dict:
     measurement = document["measurement"]
     # An observation is a number, or an object carrying one with its metadata (pyperf's).
     values = [o["value"] if isinstance(o, dict) else o for o in measurement.get("observations", [])]
+    workload = document["coordinates"]["workload"]
+    parameters = ", ".join(f"{k}={v}" for k, v in workload.get("parameters", {}).items())
     return {
-        "case": document["coordinates"]["workload"]["name"],
+        "case": workload["name"] + (f" [{parameters}]" if parameters else ""),
         "status": measurement["status"] + (f" ({measurement['reason']})" if measurement.get("reason") else ""),
         "n": len(values),
         "median": statistics.median(values) if values else None,

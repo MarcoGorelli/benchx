@@ -166,6 +166,12 @@ def run(order_path, out_dir) -> dict:
         cases = adapter.list_cases(runnable, order["suites"][0].get("filter"), child_env)
     except Unsupported as e:
         raise Refused(e.problems) from None
+    workloads = [adapter.workload(case, runnable) if hasattr(adapter, "workload") else (case, {}) for case in cases]
+    # Both share workload.parameters: a clash would overwrite the case's own value and merge distinct cases.
+    clashes = sorted({name for _, case_parameters in workloads for name in case_parameters} & parameters.keys())
+    if clashes:
+        raise Refused([Refusal(f"environment variables named like workload parameters: {', '.join(clashes)}; "
+                               "rename them")])
     written = []
     for index, case in enumerate(cases):
         stem = f"{index:04d}"
@@ -189,7 +195,12 @@ def run(order_path, out_dir) -> dict:
             facts, case_warnings = adapter.observed_environment(run_, case, env_names)
             case_system = snapshot.merge(case_system, facts)
         attempt_key = f"urn:benchx:attempt:{ref[7:23]}:{index}"
-        protocol = {**applied_protocol, "harness": adapter.harness(native_info)}
+        workload_name, case_parameters = workloads[index]
+        case_parameters = {**case_parameters, **parameters}
+        # A harness whose benchmarks declare their own precision reports each case's own protocol.
+        case_protocol = (adapter.case_protocol(applied_protocol, run_, case) if hasattr(adapter, "case_protocol")
+                         else applied_protocol)
+        protocol = {**case_protocol, "harness": adapter.harness(native_info)}
 
         for output in [*adapter.translate(case, order["quantities"], run_, attempted), _load_output(load)]:
             condition = output["quantity"] is LOAD
@@ -224,13 +235,13 @@ def run(order_path, out_dir) -> dict:
                 provenance["subject_tree"] = provenance["benchmark_tree"] = source["tree"]
             if "labels" in order:
                 provenance["labels"] = order["labels"]
-            workload = {"name": case}
-            if parameters:
-                workload["parameters"] = parameters
+            workload = {"name": workload_name}
+            if case_parameters:
+                workload["parameters"] = case_parameters
             subject = {"name": _subject_name(order), "components": [{"role": "primary"}]}
             if configuration:
                 subject["configuration"] = configuration
-            key = ingest_key(order["run_key"], case, parameters, output["quantity"]["name"], slot)
+            key = ingest_key(order["run_key"], workload_name, case_parameters, output["quantity"]["name"], slot)
             document = {
                 "schema_version": 5,
                 "producer": PROBE_PRODUCER if condition else adapter.PRODUCER,
