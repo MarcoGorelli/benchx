@@ -1,4 +1,4 @@
-"""`bx asv` and the asv adapter: a small suite in asv's language, timed by pyperf."""
+"""`bx bench --adapter asv` and the asv adapter: a small suite in asv's language, timed by pyperf."""
 
 import json
 import textwrap
@@ -67,7 +67,8 @@ SUITE = textwrap.dedent('''
             with open("teardowns", "a") as f:
                 f.write("x")
 ''')
-FAST = ["--rounds", "2", "--repeat", "2", "--warmups", "0", "--sample-time", "0.001"]
+ASV = ["bench", ".", "--adapter", "asv"]
+FAST = ["--processes", "2", "--values", "2", "--warmups", "0", "--min-time", "0.001"]
 
 
 @pytest.fixture
@@ -107,13 +108,17 @@ def test_flags_become_precision_and_overrides():
                       "warmup": {"mode": "time", "seconds": 1}})
 
 
-def test_asv_suite_reads_the_benchmark_dir(suite):
-    assert bench.asv_suite(suite) == suite / "benchmarks"
-    assert bench.asv_suite(suite / "benchmarks") == suite / "benchmarks"
+def test_asv_target_reads_the_benchmark_dir(suite, tmp):
+    assert bench.asv_target(suite) == (str(suite), "benchmarks")
+    assert bench.asv_target(suite / "benchmarks") == (str(suite), "benchmarks")
+    with pytest.raises(bench.SessionError, match="not inside the tree"):
+        bench.asv_target(suite, tree=tmp / "elsewhere")
+    with pytest.raises(bench.SessionError, match="no such benchmark directory"):
+        bench.asv_target(tmp / "missing")
 
 
 def test_asv_command_runs_every_time_benchmark(suite, capsys):
-    assert cli.main(["asv", "--run-key", "all", "--project", "p", *FAST]) == cli.EXIT_OK
+    assert cli.main([*ASV, "--run-key", "all", "--project", "p", *FAST]) == cli.EXIT_OK
     err = capsys.readouterr().err
     assert "skipped module benchmarks.needs_missing" in err
     assert "1 peakmem" in err
@@ -130,7 +135,7 @@ def test_asv_command_runs_every_time_benchmark(suite, capsys):
     assert {o["group"] for o in one["measurement"]["observations"]} == {"0", "1"}
     protocol = one["coordinates"]["protocol"]
     assert protocol["harness"]["name"] == "pyperf"
-    # The order's --repeat wins; the benchmark's own `number = 3` applies.
+    # The order's --values wins; the benchmark's own `number = 3` applies.
     assert protocol["calibration"] == {"mode": "fixed", "n_iterations": 3}
     assert protocol["repetitions"]["levels"] == [{"unit": "process", "n": 2}, {"unit": "value", "n": 2}]
     assert protocol["warmup"] == {"mode": "none"}
@@ -152,8 +157,8 @@ def test_asv_command_runs_every_time_benchmark(suite, capsys):
 
 
 def test_filter_and_benchmark_defaults(suite, capsys):
-    assert cli.main(["asv", ".", "-b", r"time_plain$", "--run-key", "one", "--no-ingest",
-                     "--rounds", "1"]) == cli.EXIT_OK
+    assert cli.main([*ASV, "--filter", r"time_plain$", "--run-key", "one", "--no-ingest",
+                     "--processes", "1"]) == cli.EXIT_OK
     found = results(suite, "one")
     assert list(found) == [("bm.time_plain", "{}")]
     document = found[("bm.time_plain", "{}")]
@@ -169,16 +174,23 @@ def test_filter_and_benchmark_defaults(suite, capsys):
 
 
 def test_filter_matches_parameters_as_asv_does(suite):
-    # asv searches `name(p0, p1)` per combination, so `time_sorted$` matches none of them, and `-b` repeats.
-    assert cli.main(["asv", ".", "-b", r"time_sorted$", "-b", r"time_sorted\(100, 'b'\)", "-b", "time_plain",
+    # asv searches `name(p0, p1)` per combination, so `time_sorted$` matches none of them.
+    assert cli.main([*ASV, "--filter", r"time_sorted$|time_sorted\(100, 'b'\)|time_plain",
                      "--run-key", "params", "--no-ingest", *FAST]) == cli.EXIT_OK
     assert sorted(results(suite, "params")) == [
         ("bm.Sort.time_sorted", json.dumps({"key": "'b'", "n": "100"})), ("bm.time_plain", "{}")]
 
 
+def test_cases_are_exact_names(suite):
+    assert cli.main([*ASV, "bm.time_plain", "bm.Sort.time_sorted(10, 'a')", "--run-key", "exact", "--no-ingest",
+                     *FAST]) == cli.EXIT_OK
+    assert sorted(results(suite, "exact")) == [
+        ("bm.Sort.time_sorted", json.dumps({"key": "'a'", "n": "10"})), ("bm.time_plain", "{}")]
+
+
 def test_env_var_named_like_a_parameter_is_refused(suite, capsys):
     # `-e key=x` would overwrite every combination's `key`, and the cases would overwrite each other's results.
-    assert cli.main(["asv", ".", "-b", "time_sorted", "-e", "key=x", "--run-key", "clash", "--no-ingest",
+    assert cli.main([*ASV, "--filter", "time_sorted", "-e", "key=x", "--run-key", "clash", "--no-ingest",
                      *FAST]) == cli.EXIT_REFUSED
     assert "environment variables named like workload parameters: key;" in capsys.readouterr().err
     assert results(suite, "clash") == {}
@@ -186,8 +198,8 @@ def test_env_var_named_like_a_parameter_is_refused(suite, capsys):
 
 def test_setup_means_one_call_per_loop(suite):
     # asv#966: a benchmark with a setup and no declared number is timed one call per value.
-    assert cli.main(["asv", "-b", r"WithSetup\.time_sum$", "--run-key", "c", "--no-ingest",
-                     "--rounds", "1"]) == cli.EXIT_OK
+    assert cli.main([*ASV, "--filter", r"WithSetup\.time_sum$", "--run-key", "c", "--no-ingest",
+                     "--processes", "1"]) == cli.EXIT_OK
     (document,) = results(suite, "c").values()
     protocol = document["coordinates"]["protocol"]
     assert protocol["calibration"] == {"mode": "fixed", "n_iterations": 1}
@@ -199,8 +211,8 @@ def test_setup_and_teardown_run_between_calls(suite, tmp):
     # number = 3: each of the three calls of a value gets its own setup; the
     # pop would fail on the second otherwise. Teardown runs before each re-setup and at the end.
     out = tmp / "m"
-    assert cli.main(["asv", "-b", r"Mutating", "--run-key", "m", "--no-ingest", "--out", str(out),
-                     "--rounds", "1", "--repeat", "2", "--warmups", "0"]) == cli.EXIT_OK
+    assert cli.main([*ASV, "--filter", r"Mutating", "--run-key", "m", "--no-ingest", "--out", str(out),
+                     "--processes", "1", "--values", "2", "--warmups", "0"]) == cli.EXIT_OK
     (document,) = (d for d in (json.loads(p.read_text()) for p in out.glob("*.json") if "workorder" not in p.name)
                    if d["measurement"].get("kind") != "condition")
     assert document["measurement"]["status"] == "success"
@@ -211,8 +223,8 @@ def test_timeout_is_the_benchmarks_own(suite):
     (suite / "benchmarks" / "slow.py").write_text("import time\n"
                                                   "class Slow:\n    timeout = 1\n"
                                                   "    def time_sleep(self):\n        time.sleep(3)\n")
-    assert cli.main(["asv", "-b", r"Slow", "--run-key", "t", "--no-ingest", "--rounds", "1",
-                     "--repeat", "1", "--warmups", "0", "--number", "1"]) == cli.EXIT_OK
+    assert cli.main([*ASV, "--filter", r"Slow", "--run-key", "t", "--no-ingest", "--processes", "1",
+                     "--values", "1", "--warmups", "0", "--loops", "1"]) == cli.EXIT_OK
     (document,) = results(suite, "t").values()
     assert (document["measurement"]["status"], document["measurement"]["reason"]) == ("error", "timeout")
 
@@ -248,5 +260,5 @@ def test_missing_asv_runner_is_refused(suite, monkeypatch, tmp, capsys):
     bare.mkdir()
     (bare / "python").symlink_to("/usr/bin/false")
     monkeypatch.setenv("PATH", str(bare))
-    assert cli.main(["asv", "--no-ingest"]) == cli.EXIT_REFUSED
+    assert cli.main([*ASV, "--no-ingest"]) == cli.EXIT_REFUSED
     assert "pyperf is not importable" in capsys.readouterr().err
