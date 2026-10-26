@@ -217,7 +217,7 @@ class Benchmark:
 
     def time_func(self):
         """pyperf's time_func(loops): seconds for `loops` calls, the collector off as
-        under asv. With setup hooks, every call sees freshly set-up state (asv#966):
+        under asv. With setup hooks, every call sees freshly set-up state (asv#966, asv_runner#53):
         teardown and setup run between calls, outside the timed region."""
         func, args, timer = self.func, self._args(), self.timer
         if not self.setups:

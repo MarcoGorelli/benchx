@@ -90,8 +90,9 @@ combinations is a case, with the parameters in `workload.parameters` as asv's
 listed and skipped. Each case is one pyperf run from a scratch directory (an unbuilt
 checkout of the project cannot shadow the installed one): the manager runs
 `setup_cache` once, and each worker runs the setups, then pyperf's warmups and
-values. With setup hooks, every timed call sees fresh state (asv#966): one call
-per loop, or setup re-run between calls outside the timer. The flags are pyperf's
+values. With setup hooks, every timed call sees fresh state, as in asv_runner
+>= 0.3.1 (asv#966, asv_runner#53): one call per loop, or setup re-run between
+calls outside the timer. The flags are pyperf's
 (asv's rounds are `--processes`, repeat `--values`, number `--loops`, sample_time
 `--min-time`, and `--warmups`); what they leave out comes from each benchmark's own
 `repeat`, `number`, `sample_time`, `warmup_time` and `timeout`, then asv's defaults

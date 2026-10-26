@@ -25,8 +25,9 @@ gives fixed loops; `sample_time` gives pyperf's `--min-time`; `warmup_time = 0`
 means no warmup, any other a single warmup value; `timeout` is pyperf's
 per-worker `--timeout`, rounded up to whole seconds (asv's default 60 s). A benchmark with setup hooks and
 no `number` is timed one call per loop, and with a `number`, setup runs again
-between calls outside the timed region: every call sees freshly set-up state
-(asv#966). Each result reports its own case's protocol (`case_protocol`).
+between calls outside the timed region: every call sees freshly set-up state,
+as in asv_runner >= 0.3.1 (asv#966, fixed by asv_runner#53). Each result
+reports its own case's protocol (`case_protocol`).
 
 Translating: pyperf's JSON as the pyperf adapter reads it; parameter values
 are kept as asv's repr() strings; asv's `version` (the same hash asv computes)
@@ -227,7 +228,7 @@ def _plan(info: dict, invocation: dict) -> dict:
     if loops is None and int(declared.get("number", 0)) > 0:
         loops = int(declared["number"])
     if loops is None and info["has_setup"]:
-        loops = 1  # asv#966: setup hooks mean each timed call sees fresh state
+        loops = 1  # as asv_runner >= 0.3.1 (asv#966, fixed by asv_runner#53): fresh state for each timed call
     min_time = invocation["min_time"] if invocation["min_time"] is not None else declared.get(
         "sample_time", DEFAULT_SAMPLE_TIME)
     warmups = invocation["warmups"]
