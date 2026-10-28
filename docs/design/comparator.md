@@ -124,8 +124,11 @@ In history mode it additionally checks that:
 In run mode it additionally checks the profile's invariants over the run (schema
 §5.5): the two sides differ only in the varying coordinate, attempt counts per
 side are equal, and sides alternate by `procedure.slot`; under `revisions`,
-that every result of both sides has a `clean` subject and benchmark tree
-(`clean-tree`, UC-03 §10). A run that fails an invariant is not compared: the comparison document records the failed invariant
+that each side has exactly one tree id and the two differ, and that a
+separately recorded benchmark has one `benchmark_tree` across both sides and
+all rounds (`one-benchmark-tree`, schema §5.5). A side that is not clean does
+not fail the run; it makes the comparison local-only (UC-03 §10). A run that
+fails an invariant is not compared: the comparison document records the failed invariant
 and contains no verdicts for the units it affects.
 
 Excluded points and their reasons remain visible in the output. Changes in

@@ -80,8 +80,9 @@ work order per side per round, alternating the sides under one `run_key`, runs
 the comparator with the `revisions` profile, and returns the comparison
 document for `spin` to render (`system-decomposition.md` §3.4). Environment
 variables such as thread caps go in the work order's environment policy, not
-in `spin`'s shell. Plain `spin bench` (UC-01) is the same path with one target
-and no comparison.
+in `spin`'s shell. If the current checkout has uncommitted changes, the
+comparison still runs and is labeled local-only (§10). Plain `spin bench`
+(UC-01) is the same path with one target and no comparison.
 
 ---
 
@@ -138,8 +139,9 @@ possible ensures reliability.
   - **interleave position**: must be stored for each measurement.
     However, see open question 1.
   - **ratio, ci_low, ci_high, classification**
-- **Comparability key:** records must *differ* in the code version (the revision)
-  and *agree* on everything under code identity.
+- **Comparability key:** records must *differ* in the code version (the
+  revision, or the working-tree id when the code is uncommitted) and *agree*
+  on everything under code identity.
 - **Validation invariants:** all records in a comparison share all of
   `project_id`, `name`, `parameters`, `environment`.
   The `environment` is compared by its hash.
@@ -155,12 +157,22 @@ possible ensures reliability.
 
 - Missing data: if the process is stopped before all interleaved runs are complete,
   the series cannot claim the profile.
-- Reject dirty trees - the comparison is invalid if there is no way to validate either
-  revision. The schema should make `dirty` non-nullable in this profile: the
-  `revisions` profile's `clean-tree` invariant fails a dirty or unknown side.
-  The comparison's environment policy carries a `tree.clean` verify rule with
-  `refuse`, so the run is refused before any measurement. This applies to comparisons only: a single-revision run (UC-01)
-  may be dirty and is recorded as dirty.
+- Dirty trees are allowed in a comparison, which then becomes local-only. A
+  side may be a checkout with uncommitted changes, such as a contributor's
+  current branch against `main`. The comparison is labeled local-only, names
+  the sides that are not clean, says so before measuring, and is never
+  promoted into tracked history (`benchmark-result-schema.md` §5.5). A
+  single-revision run (UC-01) may be dirty too, and is recorded as dirty. What
+  still fails the comparison, with no verdict for the units it affects:
+  - a side whose dirty state is `unknown`. It has no working-tree id, so the
+    sides cannot be told apart and a change during the run cannot be seen;
+    the `revisions` profile requires exactly one tree id per side;
+  - a tree that changes during the run (a side with more than one tree id);
+  - a benchmark suite recorded apart from the subject (outside its checkout)
+    that is not the same file on both sides and in every round. A suite
+    inside the subject's checkout differs between the sides exactly as the
+    subject does, and is not checked. This is the run-level form of §8: the
+    sides agree on everything under code identity.
 - Build failure of either revision happens in the target provider, before any
   work order exists, and is reported to the caller; there is no result to
   compare.
@@ -175,7 +187,7 @@ possible ensures reliability.
 1. For storing interleaving positions / other data, do we create pair
    identities under the protocol?
 2. For the future CI path, do we need a shared store for validation?
-3. Should `--compare` allow a dirty tree as a local-only comparison keyed on
-   working-tree ids, so a contributor can compare uncommitted work on the
-   current branch without committing? This use case rejects it (§10); the
-   schema would permit it (`benchmark-result-schema.md` §5.5).
+3. *Resolved:* `--compare` allows a dirty tree as a local-only comparison
+   keyed on working-tree ids, so a contributor can compare uncommitted work on
+   the current branch without committing (§10;
+   `benchmark-result-schema.md` §5.5).

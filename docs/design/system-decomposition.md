@@ -121,10 +121,11 @@ harness did not report.
   comparison target, so expensive baselines are measured once. A replayed
   baseline suits unpaired comparisons; a paired, interleaved comparison
   (UC-03) needs both sides measured fresh in one session.
-- Allows a single-revision run on a dirty tree, recorded as dirty (UC-01); a
-  two-revision comparison refuses a dirty tree (UC-03 §10), before running, by a
-  `tree.clean` verify rule where an environment policy applies, and again in
-  the comparator by the `revisions` profile's `clean-tree` invariant.
+- Allows a single-revision run on a dirty tree, recorded as dirty (UC-01),
+  and a two-revision comparison on dirty trees, labeled local-only (UC-03
+  §10); it says so before measuring. It refuses a side whose working-tree id
+  is unknown, before running, and the comparator fails the same side through the
+  `revisions` profile's invariant that each side has exactly one tree id.
 - Refuses, or loudly warns about, invalid comparisons: different machine,
   different build configuration, unknown provenance.
 - Supports the iteration loop: scoping by filter, quick low-precision runs
@@ -353,10 +354,10 @@ Not components of this system:
 3. Is the workbench a distinct deliverable or a thin skin over runner +
    comparator? Treated here as a skin with its own UX obligations, plus the
    session loop and target-provider calls of §3.4.
-4. Dirty trees in comparisons. UC-03 rejects them; a single-revision run
-   accepts them. Should `--compare` also allow a dirty tree as a local-only
+4. *Resolved:* dirty trees in comparisons. UC-03 allows them as a local-only
    comparison, keyed on working-tree ids (`benchmark-result-schema.md` §5.5),
-   so a contributor can compare uncommitted work without committing first?
+   so a contributor can compare uncommitted work without committing first; a
+   tree whose id is unknown is still refused.
 5. *Partly resolved:* the target-provider contract is in §3.4: its input is
    a request, its output a target description, a build failure is a nonzero
    exit reported by the caller, and `describe` reports without building. Still
