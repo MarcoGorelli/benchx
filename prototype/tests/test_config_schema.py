@@ -79,6 +79,17 @@ def test_a_runs_own_output_marks_the_tree_dirty_unless_ignored(checkout):
     assert (again["dirty"], again["tree"]) == ("clean", clean["tree"])
 
 
+def test_ignoring_a_path_the_checkout_gitignores_keeps_the_tree_id(checkout):
+    (checkout / ".gitignore").write_text("store.parquet\nresults/\n")
+    git(checkout, "add", "-A")
+    git(checkout, "commit", "-qm", "ignore")
+    clean = snapshot.git_identity(checkout)
+    write_outputs(checkout)
+    snapshot.ignore(checkout / "results", checkout / "store.parquet")
+    again = snapshot.git_identity(checkout)
+    assert (again["dirty"], again["tree"]) == ("clean", clean["tree"])
+
+
 def test_ignoring_does_not_hide_a_real_change(checkout):
     snapshot.ignore(checkout / "results")
     write_outputs(checkout)

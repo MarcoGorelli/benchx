@@ -130,7 +130,11 @@ def git_identity(path) -> dict | None:
     head = top and _run(["git", "rev-parse", "HEAD"], cwd=top)
     if not head:
         return None
-    excludes = [_PYCACHE_EXCLUDE, *(f":(top,exclude){rel}" for rel in _ignored_in(top))]
+    rels = _ignored_in(top)
+    # `git add` refuses a pathspec, even an exclude, that names a gitignored path,
+    # and those are left out of the tree anyway.
+    gitignored = set((rels and _run(["git", "check-ignore", "--", *rels], cwd=top) or "").splitlines())
+    excludes = [_PYCACHE_EXCLUDE, *(f":(top,exclude){rel}" for rel in rels if rel not in gitignored)]
     status = _run(["git", "status", "--porcelain", "--untracked-files=all", "--", ".", *excludes], cwd=top)
     # A scratch index that does not exist yet, so the repository's own index
     # is untouched (schema §4.1).
